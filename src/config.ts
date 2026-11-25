@@ -1,0 +1,199 @@
+/**
+ * Toutes les constantes de gameplay et de rendu.
+ * Les unités sont en mètres, secondes et radians.
+ */
+
+export const PLAYER = {
+  radius: 0.35,
+  /** Demi-hauteur du segment de la capsule debout (hauteur totale = 2 * (halfHeight + radius)). */
+  standHalfHeight: 0.55,
+  /** Demi-hauteur pendant la glissade (hauteur totale ≈ 1.0 m). */
+  slideHalfHeight: 0.15,
+  eyeHeightStand: 1.62,
+  eyeHeightSlide: 0.82,
+  eyeHeightLerp: 14,
+  maxHealth: 3,
+  healthRegenDelay: 4.5,
+  healthRegenInterval: 1.5,
+  /** Invulnérabilité après un impact. */
+  hurtInvulnerability: 0.6,
+  controllerOffset: 0.02,
+  autostepHeight: 0.45,
+  autostepMinWidth: 0.2,
+  snapToGround: 0.35,
+  maxSlopeDeg: 50,
+} as const;
+
+export const MOVEMENT = {
+  runSpeed: 11,
+  groundAccel: 14,
+  groundFriction: 11,
+  airSpeed: 11,
+  airAccel: 3.2,
+  airDrag: 0.05,
+  gravity: 26,
+  maxFallSpeed: 55,
+  jumpVelocity: 8.8,
+  doubleJumpVelocity: 8.4,
+  maxAirJumps: 1,
+  coyoteTime: 0.12,
+  jumpBufferTime: 0.14,
+  footstepDistance: 2.4,
+} as const;
+
+export const SLIDE = {
+  minSpeed: 5,
+  boost: 5,
+  maxSpeed: 21,
+  friction: 0.9,
+  duration: 0.95,
+  endFriction: 5,
+  endSpeed: 3.5,
+  crouchSpeed: 4,
+  steerRate: 1.6,
+  cooldown: 0.2,
+} as const;
+
+export const WALLRUN = {
+  minSpeed: 5.5,
+  speed: 13,
+  acceleration: 18,
+  maxDuration: 1.7,
+  gravityStart: 1.2,
+  gravityEnd: 16,
+  detectDistance: 0.75,
+  minHeightAboveGround: 0.9,
+  cameraTilt: 0.27,
+  tiltSpeed: 9,
+  jumpUp: 8.2,
+  jumpSide: 7.5,
+  jumpLookBoost: 3,
+  sameWallCooldown: 0.7,
+  stickVelocity: 2,
+  maxVerticalOnStart: 4,
+} as const;
+
+export const LEDGE = {
+  maxHeight: 2.1,
+  minHeight: 0.35,
+  probeDistance: 0.6,
+  cooldown: 0.45,
+} as const;
+
+export const DASH = {
+  speed: 30,
+  duration: 0.17,
+  exitSpeed: 15,
+  maxCharges: 2,
+  rechargeTime: 1.4,
+  airOnly: true,
+  fovKick: 14,
+} as const;
+
+export const SANDEVISTAN = {
+  /** Échelle de temps du monde (ennemis, projectiles, particules, pluie). */
+  worldTimeScale: 0.18,
+  /** Échelle de temps appliquée au joueur pendant le Sandevistan. */
+  playerTimeScale: 0.85,
+  /** Fraction de jauge consommée par seconde réelle. */
+  drainPerSecond: 0.2,
+  rechargePerSecond: 0.07,
+  minToActivate: 0.15,
+  transitionSpeed: 7,
+  killRefill: 0.12,
+} as const;
+
+export const CAMERA = {
+  fov: 84,
+  speedFovBoost: 12,
+  sensitivity: 0.0022,
+  pitchLimit: 1.53,
+  headBobAmount: 0.04,
+  headBobFrequency: 1.35,
+  landingDipMax: 0.32,
+  strafeLean: 0.025,
+  near: 0.03,
+  far: 1600,
+} as const;
+
+export const BLADES = {
+  range: 3.4,
+  coneAngleDeg: 55,
+  slashDuration: 0.3,
+  /** Fraction de l'animation pendant laquelle la lame touche. */
+  activeStart: 0.14,
+  activeEnd: 0.62,
+  /** Délai minimal entre deux coups (s). */
+  cooldown: 0.22,
+  forwardPush: 5,
+  lungeRange: 7.5,
+  lungeConeDeg: 22,
+  lungeSpeed: 17,
+  deflectRange: 3.6,
+  trailLife: 0.16,
+} as const;
+
+export const PISTOL = {
+  fireInterval: 0.15,
+  range: 220,
+  recoilPitch: 0.03,
+  recoilRecovery: 10,
+  beamDuration: 0.1,
+  aimAssistRadius: 0.35,
+} as const;
+
+export const ENEMIES = {
+  guard: {
+    detectionRange: 46,
+    aimDuration: 1.15,
+    cooldown: 2.1,
+    projectileSpeed: 30,
+    turnSpeed: 4,
+  },
+  drone: {
+    detectionRange: 55,
+    aimDuration: 0.85,
+    cooldown: 1.7,
+    projectileSpeed: 25,
+    orbitRadius: 2.2,
+    orbitSpeed: 0.7,
+    hoverAmplitude: 0.35,
+  },
+  aimLagRate: 5,
+  aimLockTime: 0.22,
+  losCheckInterval: 0.15,
+  loseTargetTime: 0.6,
+  projectileRadius: 0.18,
+  projectileLifetime: 4,
+  projectileDamage: 1,
+  activeDistance: 140,
+} as const;
+
+export const COMBAT = {
+  hitstopDuration: 0.08,
+  hitstopTimeScale: 0.03,
+  killShake: 0.35,
+  hurtShake: 0.55,
+} as const;
+
+export const WORLD = {
+  killPlaneY: -28,
+  rainCount: 3800,
+  rainAreaSize: 52,
+  rainAreaHeight: 34,
+  rainSpeed: 27,
+  rainWind: 3.5,
+  rainLength: 0.7,
+  fogColor: 0x120a22,
+  fogDensity: 0.0068,
+  trafficCount: 34,
+} as const;
+
+export const GRAPHICS = {
+  maxPixelRatio: 1.5,
+  bloomStrength: 0.7,
+  bloomRadius: 0.45,
+  bloomThreshold: 0.8,
+  exposure: 0.95,
+  maxParticles: 3500,
+} as const;

@@ -93,3 +93,7 @@ ENV/
 
 # mkdocs
 site
+# Node / Vite (prototype NEON VERTIGO)
+node_modules/
+dist-ssr/
+*.local
