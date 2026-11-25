@@ -39,6 +39,8 @@ export const MOVEMENT = {
   coyoteTime: 0.12,
   jumpBufferTime: 0.14,
   footstepDistance: 2.4,
+  /** Entrée « avancer » minimale (0..1) pour déclencher wall-run et franchissement. */
+  forwardInputThreshold: 0.25,
 } as const;
 
 export const SLIDE = {
@@ -178,7 +180,6 @@ export const COMBAT = {
 
 export const WORLD = {
   killPlaneY: -28,
-  rainCount: 3800,
   rainAreaSize: 52,
   rainAreaHeight: 34,
   rainSpeed: 27,
@@ -186,14 +187,65 @@ export const WORLD = {
   rainLength: 0.7,
   fogColor: 0x120a22,
   fogDensity: 0.0068,
-  trafficCount: 34,
 } as const;
 
 export const GRAPHICS = {
-  maxPixelRatio: 1.5,
   bloomStrength: 0.7,
   bloomRadius: 0.45,
   bloomThreshold: 0.8,
   exposure: 0.95,
-  maxParticles: 3500,
+  /** Résolution dynamique : temps de frame visé et seuils d'ajustement (s). */
+  targetFrameTime: 1 / 58,
+  slowFrameTime: 1 / 45,
+  resolutionCheckInterval: 1.5,
+} as const;
+
+export interface QualityPreset {
+  /** Rapport de pixels initial / maximal / minimal (résolution dynamique). */
+  initialPixelRatio: number;
+  maxPixelRatio: number;
+  minPixelRatio: number;
+  maxParticles: number;
+  rainCount: number;
+  trafficCount: number;
+  /** Lumières ponctuelles décoratives le long du parcours (coûteuses sur mobile). */
+  neonLights: boolean;
+}
+
+export const QUALITY_PRESETS: { desktop: QualityPreset; mobile: QualityPreset } = {
+  desktop: {
+    initialPixelRatio: 1.5,
+    maxPixelRatio: 1.5,
+    minPixelRatio: 0.75,
+    maxParticles: 3500,
+    rainCount: 3800,
+    trafficCount: 34,
+    neonLights: true,
+  },
+  mobile: {
+    initialPixelRatio: 1.0,
+    maxPixelRatio: 1.5,
+    minPixelRatio: 0.6,
+    maxParticles: 1600,
+    rainCount: 1600,
+    trafficCount: 16,
+    neonLights: false,
+  },
+};
+
+/** Commandes tactiles (mobile). */
+export const TOUCH = {
+  /** Radians par pixel glissé pour la visée. */
+  lookSensitivityX: 0.0048,
+  lookSensitivityY: 0.0038,
+  /** Facteur de visée quand le doigt glisse depuis un bouton (attaque / saut). */
+  buttonLookFactor: 0.8,
+  joystickRadius: 58,
+  deadzone: 0.12,
+  /** Déflexion du joystick à partir de laquelle on court à pleine vitesse. */
+  fullSpeedAt: 0.7,
+  pistolAimAssist: 0.8,
+  lungeConeDeg: 32,
+  vibrationKill: 18,
+  vibrationHurt: 45,
 } as const;

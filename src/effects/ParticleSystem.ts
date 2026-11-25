@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GRAPHICS } from '../config';
+import { QUALITY } from '../core/Device';
 
 export interface BurstOptions {
   count: number;
@@ -42,7 +42,7 @@ interface FlashLight {
  * draw call, plus des flashs (sprites) et des lumières ponctuelles recyclées.
  */
 export class ParticleSystem {
-  private readonly max = GRAPHICS.maxParticles;
+  private readonly max = QUALITY.maxParticles;
   private readonly positions: Float32Array;
   private readonly velocities: Float32Array;
   private readonly colors: Float32Array;

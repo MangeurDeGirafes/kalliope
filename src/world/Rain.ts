@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { WORLD } from '../config';
+import { QUALITY } from '../core/Device';
 
 /**
  * Pluie en particules : segments de ligne recyclés dans une boîte qui suit la
@@ -8,7 +9,7 @@ import { WORLD } from '../config';
  */
 export class Rain {
   readonly mesh: THREE.LineSegments;
-  private readonly count = WORLD.rainCount;
+  private readonly count = QUALITY.rainCount;
   private readonly drops: Float32Array;
   private readonly speeds: Float32Array;
   private readonly positions: Float32Array;

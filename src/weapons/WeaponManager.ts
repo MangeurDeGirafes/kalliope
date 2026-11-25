@@ -10,22 +10,22 @@ import type { PlayerController } from '../player/PlayerController';
 import { Beam } from '../effects/Beam';
 import { BladeTrail } from '../effects/BladeTrail';
 import { createRadialTexture } from '../effects/ParticleSystem';
-import { BLADES, PISTOL } from '../config';
+import { MantisArm, armPose, createArmPose, lerpArmPose, mirrorArmPose } from './MantisBladeModel';
+import type { ArmPose } from './MantisBladeModel';
+import { BLADES, PISTOL, TOUCH } from '../config';
 
 export type WeaponId = 'blades' | 'pistol';
 
-interface Pose {
-  p: THREE.Vector3;
-  q: THREE.Quaternion;
-}
-
 interface BladeArm {
-  group: THREE.Group;
-  blade: THREE.Mesh;
+  model: MantisArm;
   side: 1 | -1;
-  rest: Pose;
-  windup: Pose;
-  strike: Pose;
+  /** Lame repliée contre l'avant-bras (début du déploiement). */
+  folded: ArmPose;
+  rest: ArmPose;
+  /** Armé : patte repliée et levée, prête à frapper. */
+  windup: ArmPose;
+  /** Fin de frappe : genou déplié, lame tendue. */
+  strike: ArmPose;
 }
 
 interface LaserShot {
@@ -40,17 +40,7 @@ const CYAN = new THREE.Color(0x00e5ff);
 const MAGENTA = new THREE.Color(0xff2bd6);
 const SWITCH_TIME = 0.32;
 
-function pose(x: number, y: number, z: number, rx: number, ry: number, rz: number): Pose {
-  return {
-    p: new THREE.Vector3(x, y, z),
-    q: new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz, 'YXZ')),
-  };
-}
-
-function mirrorPose(src: Pose): Pose {
-  const e = new THREE.Euler().setFromQuaternion(src.q, 'YXZ');
-  return pose(-src.p.x, src.p.y, src.p.z, e.x, -e.y, -e.z);
-}
+const DEPLOY_TIME = 0.45;
 
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
@@ -58,6 +48,13 @@ function easeOutCubic(t: number): number {
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/** Léger dépassement (déploiement mécanique « qui claque »). */
+function easeOutBack(t: number): number {
+  const c1 = 1.5;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 
 /**
@@ -68,6 +65,8 @@ function easeInOutCubic(t: number): number {
 export class WeaponManager {
   current: WeaponId = 'blades';
   onWeaponChange: ((id: WeaponId) => void) | null = null;
+  /** Mode tactile : assistance de visée renforcée. */
+  touchMode = false;
 
   private readonly engine: Engine;
   private readonly physics: Physics;
@@ -83,9 +82,7 @@ export class WeaponManager {
   private readonly pistolModel = new THREE.Group();
   private readonly arms: BladeArm[] = [];
   private readonly trail: BladeTrail;
-  private readonly bladeTip = new THREE.Vector3(0.02, 0.95, 0);
-  private readonly bladeMid = new THREE.Vector3(0.05, 0.35, 0);
-  private readonly bladeMaterials: THREE.MeshStandardMaterial[] = [];
+  private readonly armPose = createArmPose();
 
   private readonly muzzle = new THREE.Object3D();
   private readonly muzzleFlash: THREE.Mesh;
@@ -101,6 +98,8 @@ export class WeaponManager {
   private slashArm = 0;
   private slashCooldown = 0;
   private lastSlashT = 0;
+  /** Progression du déploiement des lames (0 = repliées, 1 = sorties). */
+  private deploy = 1;
   private fireCooldown = 0;
   private kick = 0;
   private flashTimer = 0;
@@ -184,10 +183,9 @@ export class WeaponManager {
     }
     this.lastYaw = this.player.yaw;
     this.lastPitch = this.player.pitch;
-    for (const arm of this.arms) {
-      arm.group.position.copy(arm.rest.p);
-      arm.group.quaternion.copy(arm.rest.q);
-    }
+    this.deploy = 0;
+    for (const arm of this.arms) arm.model.apply(arm.folded);
+    if (this.current === 'blades') this.audio.playBladeDeploy();
   }
 
   get isSwitching(): boolean {
@@ -248,6 +246,10 @@ export class WeaponManager {
       this.current = this.pendingWeapon;
       this.pendingWeapon = null;
       this.applyVisibility();
+      if (this.current === 'blades') {
+        this.deploy = 0;
+        this.audio.playBladeDeploy();
+      }
       this.onWeaponChange?.(this.current);
     }
   }
@@ -318,12 +320,8 @@ export class WeaponManager {
     // Propulsion : bond vers une cible proche, sinon légère poussée vers l'avant.
     const eye = this.engine.camera.position;
     const forward = this.player.getLookDirection(this.tmp);
-    const lungeTarget = this.enemies.findLungeTarget(
-      eye,
-      forward,
-      BLADES.lungeRange,
-      Math.cos(THREE.MathUtils.degToRad(BLADES.lungeConeDeg)),
-    );
+    const cone = this.touchMode ? TOUCH.lungeConeDeg : BLADES.lungeConeDeg;
+    const lungeTarget = this.enemies.findLungeTarget(eye, forward, BLADES.lungeRange, Math.cos(THREE.MathUtils.degToRad(cone)));
     if (lungeTarget && lungeTarget.distanceTo(eye) > BLADES.range * 0.8) {
       this.player.lungeTo(lungeTarget, BLADES.lungeSpeed);
     } else {
@@ -331,37 +329,34 @@ export class WeaponManager {
     }
   }
 
-  private slashPose(arm: BladeArm, t: number, out: Pose): void {
+  /** Animation de frappe : armement (patte repliée) → détente du genou → retour. */
+  private slashPose(arm: BladeArm, t: number, out: ArmPose): ArmPose {
     const w = 0.18;
     const s = 0.5;
-    if (t < w) {
-      const k = easeOutCubic(t / w);
-      out.p.lerpVectors(arm.rest.p, arm.windup.p, k);
-      out.q.slerpQuaternions(arm.rest.q, arm.windup.q, k);
-    } else if (t < s) {
-      const k = easeInOutCubic((t - w) / (s - w));
-      out.p.lerpVectors(arm.windup.p, arm.strike.p, k);
-      out.q.slerpQuaternions(arm.windup.q, arm.strike.q, k);
-    } else {
-      const k = easeInOutCubic((t - s) / (1 - s));
-      out.p.lerpVectors(arm.strike.p, arm.rest.p, k);
-      out.q.slerpQuaternions(arm.strike.q, arm.rest.q, k);
-    }
+    if (t < w) return lerpArmPose(arm.rest, arm.windup, easeOutCubic(t / w), out);
+    if (t < s) return lerpArmPose(arm.windup, arm.strike, easeInOutCubic((t - w) / (s - w)), out);
+    return lerpArmPose(arm.strike, arm.rest, easeInOutCubic((t - s) / (1 - s)), out);
+  }
+
+  private idlePose(arm: BladeArm, index: number, out: ArmPose): ArmPose {
+    const k = this.deploy >= 1 ? 1 : easeOutBack(this.deploy);
+    lerpArmPose(arm.folded, arm.rest, k, out);
+    // Respiration + micro-mouvements mécaniques de la patte
+    out.p.y += Math.sin(this.time * 2 + index) * 0.006;
+    out.femur += Math.sin(this.time * 0.9 + index * 2) * 0.015;
+    out.knee += Math.sin(this.time * 1.4 + index) * 0.035;
+    return out;
   }
 
   private updateBlades(dt: number): void {
-    // Pulsation des lames
-    const pulse = 0.5 + Math.sin(this.time * 6) * 0.12;
-    for (const m of this.bladeMaterials) m.emissiveIntensity = pulse;
+    this.deploy = Math.min(1, this.deploy + dt / DEPLOY_TIME);
+    const pulse = 0.5 + Math.sin(this.time * 6) * 0.5;
+    for (const arm of this.arms) arm.model.setPulse(pulse);
 
-    // Bras au repos : légère respiration
     for (let i = 0; i < this.arms.length; i++) {
-      const arm = this.arms[i];
       if (this.slashTime >= 0 && i === this.slashArm) continue;
-      const breathe = Math.sin(this.time * 2 + i) * 0.006;
-      arm.group.position.copy(arm.rest.p);
-      arm.group.position.y += breathe;
-      arm.group.quaternion.copy(arm.rest.q);
+      const arm = this.arms[i];
+      arm.model.apply(this.idlePose(arm, i, this.armPose));
     }
 
     if (this.slashTime >= 0 && this.current === 'blades') {
@@ -372,16 +367,13 @@ export class WeaponManager {
 
       // Sous-échantillonnage de l'animation pour une traînée lisse
       const sub = 4;
-      const tmpPose: Pose = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
       for (let i = 1; i <= sub; i++) {
         const ti = prevT + ((t - prevT) * i) / sub;
-        this.slashPose(arm, ti, tmpPose);
-        arm.group.position.copy(tmpPose.p);
-        arm.group.quaternion.copy(tmpPose.q);
-        if (ti > 0.1 && ti < 0.72) {
-          arm.group.updateMatrixWorld(true);
-          const tip = arm.blade.localToWorld(this.tmp.copy(this.bladeTip));
-          const mid = arm.blade.localToWorld(this.tmp2.copy(this.bladeMid));
+        arm.model.apply(this.slashPose(arm, ti, this.armPose));
+        if (ti > 0.12 && ti < 0.72) {
+          arm.model.group.updateMatrixWorld(true);
+          const tip = arm.model.tip.getWorldPosition(this.tmp);
+          const mid = arm.model.edgeMid.getWorldPosition(this.tmp2);
           this.root.worldToLocal(tip);
           this.root.worldToLocal(mid);
           this.trail.addSample(tip, mid);
@@ -405,92 +397,26 @@ export class WeaponManager {
   }
 
   private buildBlades(): void {
-    const armorMat = new THREE.MeshStandardMaterial({ color: 0x20232e, metalness: 0.85, roughness: 0.28 });
-    const gloveMat = new THREE.MeshStandardMaterial({ color: 0x0d0e14, metalness: 0.2, roughness: 0.7 });
-
-    // Profil incurvé de la lame (plan XY, longueur selon +Y)
-    const shape = new THREE.Shape();
-    shape.moveTo(0, 0);
-    shape.quadraticCurveTo(0.17, 0.45, 0.02, 0.95);
-    shape.quadraticCurveTo(0.065, 0.45, -0.07, 0.03);
-    shape.lineTo(0, 0);
-    const bladeGeo = new THREE.ExtrudeGeometry(shape, {
-      depth: 0.012,
-      bevelEnabled: true,
-      bevelThickness: 0.004,
-      bevelSize: 0.004,
-      bevelSegments: 1,
-      curveSegments: 20,
-    });
-    bladeGeo.translate(0, 0, -0.006);
-
-    // Tranchant lumineux
-    const edgeCurve = new THREE.QuadraticBezierCurve3(
-      new THREE.Vector3(-0.07, 0.03, 0),
-      new THREE.Vector3(0.065, 0.45, 0),
-      new THREE.Vector3(0.02, 0.95, 0),
-    );
-    const edgeGeo = new THREE.TubeGeometry(edgeCurve, 24, 0.0055, 5, false);
-
     const make = (side: 1 | -1, color: THREE.Color): BladeArm => {
-      const group = new THREE.Group();
-      const inner = new THREE.Group();
-      inner.scale.x = side;
-      group.add(inner);
-
-      inner.add(this.meshAt(new THREE.BoxGeometry(0.09, 0.09, 0.46), armorMat, 0, 0, 0.06));
-      inner.add(this.meshAt(new THREE.BoxGeometry(0.1, 0.06, 0.2), armorMat, 0.01, 0.045, 0.12));
-      inner.add(this.meshAt(new THREE.BoxGeometry(0.115, 0.1, 0.12), armorMat, 0, 0, -0.17));
-      inner.add(this.meshAt(new THREE.BoxGeometry(0.09, 0.1, 0.1), gloveMat, -0.005, -0.012, -0.26));
-
-      const stripMat = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(3), toneMapped: false });
-      inner.add(this.meshAt(new THREE.BoxGeometry(0.012, 0.012, 0.36), stripMat, 0.046, 0.03, 0.04));
-      inner.add(this.meshAt(new THREE.BoxGeometry(0.03, 0.012, 0.012), stripMat, 0.03, 0.052, -0.17));
-
-      const bladeMat = new THREE.MeshStandardMaterial({
-        color: 0x0a1418,
-        metalness: 0.95,
-        roughness: 0.18,
-        emissive: color,
-        emissiveIntensity: 0.5,
-        side: THREE.DoubleSide,
-      });
-      this.bladeMaterials.push(bladeMat);
-      const edgeMat = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(4), toneMapped: false });
-
-      // Orientation de la lame à partir d'une base : longueur L (vers l'avant et le haut),
-      // dos de la lame B (vers le haut / l'extérieur), épaisseur N = B × L.
-      const L = new THREE.Vector3(0.06, 0.5, -1).normalize();
-      const B = new THREE.Vector3(0.55, 1, 0);
-      B.addScaledVector(L, -B.dot(L)).normalize();
-      const N = new THREE.Vector3().crossVectors(B, L).normalize();
-      const bladePivot = new THREE.Group();
-      bladePivot.position.set(0.04, 0.035, -0.1);
-      bladePivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(B, L, N));
-      inner.add(bladePivot);
-      const blade = new THREE.Mesh(bladeGeo, bladeMat);
-      blade.scale.setScalar(0.62);
-      bladePivot.add(blade);
-      const edge = new THREE.Mesh(edgeGeo, edgeMat);
-      blade.add(edge);
-
-      const rest = pose(0.27, -0.3, -0.26, 0.08, -0.05, -0.12);
-      const windup = pose(0.42, -0.06, -0.2, 0.55, -0.3, -1.05);
-      const strike = pose(-0.14, -0.4, -0.44, -0.38, 0.9, 0.95);
+      const model = new MantisArm(side, color);
+      // Poses du bras droit (le gauche est symétrique)
+      // Garde de mante : avant-bras levés et tournés vers l'intérieur, griffes repliées devant.
+      const folded = armPose(0.27, -0.44, -0.2, 0.3, 0.3, -0.15, -0.02, -2.75);
+      const rest = armPose(0.25, -0.33, -0.27, 0.42, 0.36, -0.18, 0.28, -1.55);
+      const windup = armPose(0.36, -0.14, -0.2, 0.75, -0.1, -0.85, 0.6, -2.4);
+      const strike = armPose(-0.1, -0.26, -0.48, 0.04, 0.95, 0.5, 0.1, -0.16);
       const arm: BladeArm = {
-        group,
-        blade,
+        model,
         side,
-        rest: side === 1 ? rest : mirrorPose(rest),
-        windup: side === 1 ? windup : mirrorPose(windup),
-        strike: side === 1 ? strike : mirrorPose(strike),
+        folded: side === 1 ? folded : mirrorArmPose(folded),
+        rest: side === 1 ? rest : mirrorArmPose(rest),
+        windup: side === 1 ? windup : mirrorArmPose(windup),
+        strike: side === 1 ? strike : mirrorArmPose(strike),
       };
-      group.position.copy(arm.rest.p);
-      group.quaternion.copy(arm.rest.q);
-      this.bladesGroup.add(group);
+      model.apply(arm.rest);
+      this.bladesGroup.add(model.group);
       return arm;
     };
-
     this.arms.push(make(1, CYAN.clone()), make(-1, MAGENTA.clone()));
   }
 
@@ -506,7 +432,8 @@ export class WeaponManager {
 
     const worldHit = this.physics.raycast(origin, dir, PISTOL.range);
     const maxDist = worldHit ? worldHit.distance : PISTOL.range;
-    const enemyHit = this.enemies.raycast(origin, dir, maxDist, PISTOL.aimAssistRadius);
+    const assist = this.touchMode ? TOUCH.pistolAimAssist : PISTOL.aimAssistRadius;
+    const enemyHit = this.enemies.raycast(origin, dir, maxDist, assist);
 
     let end: THREE.Vector3;
     if (enemyHit) {

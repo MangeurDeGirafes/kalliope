@@ -10,7 +10,9 @@ import { EnemyManager } from './enemies/EnemyManager';
 import { LevelBuilder } from './world/LevelBuilder';
 import type { LevelData } from './world/LevelBuilder';
 import { HUD } from './ui/HUD';
-import { COMBAT, DASH, PLAYER, SANDEVISTAN } from './config';
+import { TouchControls } from './ui/TouchControls';
+import { IS_TOUCH, vibrate } from './core/Device';
+import { COMBAT, DASH, PLAYER, SANDEVISTAN, TOUCH } from './config';
 
 type GameState = 'menu' | 'playing' | 'paused' | 'dead' | 'finished';
 
@@ -29,6 +31,7 @@ export class Game {
   private readonly enemies: EnemyManager;
   private readonly weapons: WeaponManager;
   private readonly hud: HUD;
+  private readonly touch: TouchControls | null;
 
   private state: GameState = 'menu';
   private lastTime = 0;
@@ -61,7 +64,17 @@ export class Game {
     this.enemies = new EnemyManager(this.engine.scene, physics, this.particles, this.audio);
     this.enemies.spawnAll(this.levelData.enemySpawns);
     this.weapons = new WeaponManager(this.engine, physics, this.enemies, this.particles, this.audio, this.player);
-    this.hud = new HUD(document.body, DASH.maxCharges, PLAYER.maxHealth);
+    this.hud = new HUD(document.body, DASH.maxCharges, PLAYER.maxHealth, IS_TOUCH);
+
+    // Mode mobile : commandes tactiles, pas de pointer lock, visée assistée
+    if (IS_TOUCH) {
+      this.input.setTouchMode(true);
+      this.weapons.touchMode = true;
+      this.touch = new TouchControls(document.body, this.input);
+      this.touch.onPause = () => this.pause();
+    } else {
+      this.touch = null;
+    }
 
     this.wireEvents();
     this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
@@ -82,37 +95,38 @@ export class Game {
   private wireEvents(): void {
     this.hud.onOverlayClick = () => {
       this.audio.init();
-      switch (this.state) {
-        case 'menu':
-          this.input.requestPointerLock();
-          this.restart();
-          break;
-        case 'paused':
-          this.input.requestPointerLock();
-          break;
-        case 'dead':
-        case 'finished':
-          this.input.requestPointerLock();
-          this.restart();
-          break;
-        default:
-          this.input.requestPointerLock();
+      if (this.touch) {
+        this.enterFullscreen();
+        if (this.state === 'paused') this.resume();
+        else this.restart();
+        return;
       }
+      this.input.requestPointerLock();
+      if (this.state !== 'paused') this.restart();
+    };
+    this.hud.onRestartClick = () => {
+      this.audio.init();
+      if (!this.touch) this.input.requestPointerLock();
+      this.restart();
     };
 
+    // Application mise en arrière-plan / onglet masqué : pause automatique
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.pause();
+    });
+    if (this.touch) {
+      // Empêche le zoom par pincement sur iOS
+      document.addEventListener('gesturestart', (e) => e.preventDefault());
+    }
+
     this.engine.canvas.addEventListener('click', () => {
-      if (this.state === 'playing' && !this.input.isPointerLocked) this.input.requestPointerLock();
+      if (!this.touch && this.state === 'playing' && !this.input.isPointerLocked) this.input.requestPointerLock();
     });
 
     this.input.onPointerLockChange = (locked) => {
-      if (!locked && this.state === 'playing') {
-        this.state = 'paused';
-        this.audio.stopLoops();
-        this.hud.showPause();
-      } else if (locked && this.state === 'paused') {
-        this.state = 'playing';
-        this.hud.hideOverlay();
-      }
+      if (this.touch) return;
+      if (!locked && this.state === 'playing') this.pause();
+      else if (locked && this.state === 'paused') this.resume();
     };
 
     this.weapons.onWeaponChange = (id) => this.hud.setWeapon(id);
@@ -124,6 +138,7 @@ export class Game {
       this.player.rewardKill();
       this.hud.hitMarker();
       this.audio.playKillConfirm();
+      vibrate(TOUCH.vibrationKill);
       if (this.enemies.aliveCount === 0) this.hud.flashMessage('ZONE NETTOYÉE', '#2bffb0', 1800);
     };
 
@@ -189,6 +204,7 @@ export class Game {
         if (active) this.hud.flashMessage('SANDEVISTAN', '#2bffb0', 900);
       },
       onHurt: () => {
+        vibrate(TOUCH.vibrationHurt);
         if (this.player.alive) this.hud.flashMessage('INTÉGRITÉ COMPROMISE', '#ff2040', 700);
       },
       onDeath: () => {
@@ -197,6 +213,8 @@ export class Game {
           this.deathTimer = 0;
           this.deathShown = false;
           this.timerRunning = false;
+          this.touch?.setVisible(false);
+          vibrate(120);
         }
       },
     };
@@ -217,7 +235,7 @@ export class Game {
   private update(realDt: number): void {
     if (this.input.wasPressed('restart') && this.state !== 'menu') {
       this.audio.init();
-      if (!this.input.isPointerLocked) this.input.requestPointerLock();
+      if (!this.touch && !this.input.isPointerLocked) this.input.requestPointerLock();
       this.restart();
     }
 
@@ -241,7 +259,7 @@ export class Game {
     const worldDt = realDt * hitstopScale * THREE.MathUtils.lerp(1, SANDEVISTAN.worldTimeScale, sand);
     const playerDt = realDt * hitstopScale * THREE.MathUtils.lerp(1, SANDEVISTAN.playerTimeScale, sand);
 
-    const controlsEnabled = this.state === 'playing' && this.input.isPointerLocked;
+    const controlsEnabled = this.state === 'playing' && this.input.isActive;
 
     this.physics.step();
     this.player.update(playerDt, realDt, this.input, controlsEnabled);
@@ -282,6 +300,12 @@ export class Game {
       health: this.player.health,
       maxHealth: PLAYER.maxHealth,
       speed: this.player.horizontalSpeed,
+    });
+    this.touch?.update({
+      weapon: this.weapons.current,
+      sandevistanActive: this.player.sandevistanActive,
+      sandevistan: this.player.sandevistanEnergy,
+      dashCharges: this.player.dashCharges,
     });
 
     const speedFx = THREE.MathUtils.clamp((this.player.horizontalSpeed - 12) / 18, 0, 1);
@@ -329,9 +353,51 @@ export class Game {
     this.state = 'playing';
     this.hud.hideOverlay();
     this.hud.setVisible(true);
+    this.touch?.releaseAll();
+    this.touch?.setVisible(true);
     this.hud.setWeapon(this.weapons.current);
     this.hud.flashMessage('NEURAL-LINK ACTIF', '#00e5ff', 1100);
     this.audio.playStart();
+  }
+
+  private pause(): void {
+    if (this.state !== 'playing') return;
+    this.state = 'paused';
+    this.audio.stopLoops();
+    this.input.releaseVirtual();
+    this.touch?.setVisible(false);
+    this.hud.showPause();
+  }
+
+  private resume(): void {
+    if (this.state !== 'paused') return;
+    this.state = 'playing';
+    this.hud.hideOverlay();
+    this.touch?.setVisible(true);
+  }
+
+  /** Plein écran + verrouillage paysage quand le navigateur le permet (Android). */
+  private enterFullscreen(): void {
+    if (document.fullscreenElement) return;
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    try {
+      if (typeof el.requestFullscreen === 'function') {
+        el.requestFullscreen({ navigationUI: 'hide' })
+          .then(() => {
+            const orientation = screen.orientation as unknown as { lock?: (o: string) => Promise<void> };
+            orientation.lock?.('landscape').catch(() => {
+              /* verrouillage refusé : le message « tourne ton appareil » prend le relais */
+            });
+          })
+          .catch(() => {
+            /* plein écran refusé : on joue dans la page */
+          });
+      } else {
+        el.webkitRequestFullscreen?.();
+      }
+    } catch {
+      /* API indisponible (iPhone) */
+    }
   }
 
   private checkJumpPads(): void {
@@ -383,6 +449,7 @@ export class Game {
 
     this.state = 'finished';
     this.timerRunning = false;
+    this.touch?.setVisible(false);
     const best = this.loadBestTime();
     const isRecord = best === null || this.elapsed < best;
     if (isRecord) this.saveBestTime(this.elapsed);

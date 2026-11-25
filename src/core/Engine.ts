@@ -6,6 +6,7 @@ import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { CAMERA, GRAPHICS, WORLD } from '../config';
+import { QUALITY } from './Device';
 
 /** Shader final : aberration chromatique, vignette, teinte Sandevistan, dégâts, mort, grain. */
 const CyberFxShader = {
@@ -107,12 +108,18 @@ export class Engine {
   private readonly fxPass: ShaderPass;
   private readonly container: HTMLElement;
   private elapsed = 0;
+  // Résolution dynamique
+  private pixelRatio: number;
+  private frameAccum = 0;
+  private frameCount = 0;
+  private warmup = 2;
 
   constructor(container: HTMLElement) {
     this.container = container;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, GRAPHICS.maxPixelRatio));
+    this.pixelRatio = Math.min(window.devicePixelRatio, QUALITY.initialPixelRatio);
+    this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = GRAPHICS.exposure;
@@ -206,6 +213,39 @@ export class Engine {
     this.elapsed += realDt;
     this.fxPass.uniforms.uTime.value = this.elapsed;
     this.composer.render(realDt);
+    this.adaptResolution(realDt);
+  }
+
+  /** Rapport de pixels courant (résolution de rendu / résolution CSS). */
+  get currentPixelRatio(): number {
+    return this.pixelRatio;
+  }
+
+  /**
+   * Résolution dynamique : baisse le rapport de pixels si les frames sont trop
+   * lentes, le remonte doucement quand il y a de la marge.
+   */
+  private adaptResolution(realDt: number): void {
+    if (this.warmup > 0) {
+      this.warmup -= realDt;
+      return;
+    }
+    this.frameAccum += realDt;
+    this.frameCount++;
+    if (this.frameAccum < GRAPHICS.resolutionCheckInterval) return;
+    const avg = this.frameAccum / this.frameCount;
+    this.frameAccum = 0;
+    this.frameCount = 0;
+
+    const max = Math.min(window.devicePixelRatio, QUALITY.maxPixelRatio);
+    let next = this.pixelRatio;
+    if (avg > GRAPHICS.slowFrameTime) next = Math.max(QUALITY.minPixelRatio, this.pixelRatio - 0.15);
+    else if (avg < GRAPHICS.targetFrameTime) next = Math.min(max, this.pixelRatio + 0.05);
+    if (Math.abs(next - this.pixelRatio) < 0.01) return;
+    this.pixelRatio = next;
+    this.renderer.setPixelRatio(next);
+    this.composer.setPixelRatio(next);
+    this.resize();
   }
 
   /** Carte d'environnement néon générée procéduralement (reflets cyan / magenta). */

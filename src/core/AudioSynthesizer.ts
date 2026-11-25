@@ -231,6 +231,15 @@ export class AudioSynthesizer {
     this.tone({ type: 'square', from: 180, to: 160, duration: 0.12, volume: 0.07, delay: 0.1 });
   }
 
+  /** Déploiement mécanique des lames : servo + verrouillage. */
+  playBladeDeploy(): void {
+    this.tone({ type: 'square', from: 260, to: 820, duration: 0.2, volume: 0.035 });
+    this.noise({ duration: 0.22, volume: 0.12, type: 'bandpass', from: 1200, to: 3800, q: 2 });
+    this.tone({ type: 'triangle', from: 2600, to: 2300, duration: 0.08, volume: 0.07, delay: 0.24 });
+    this.noise({ duration: 0.05, volume: 0.22, type: 'highpass', from: 5000, to: 3000, q: 0.7, delay: 0.24 });
+    this.tone({ type: 'sine', from: 5200, to: 5000, duration: 0.3, volume: 0.025, delay: 0.26 });
+  }
+
   playWeaponSwitch(): void {
     this.tone({ type: 'square', from: 900, to: 1300, duration: 0.05, volume: 0.05 });
     this.noise({ duration: 0.12, volume: 0.15, type: 'highpass', from: 4500, to: 2500, q: 0.6, delay: 0.04 });

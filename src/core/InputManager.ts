@@ -1,8 +1,11 @@
 /**
- * Gestion des entrées clavier / souris.
+ * Gestion des entrées clavier / souris / tactile.
  * Les touches sont lues via `KeyboardEvent.code` (position physique), ce qui couvre
  * automatiquement ZQSD (AZERTY) et WASD (QWERTY). Les deux jeux de lettres sont en plus
  * explicitement liés pour éviter toute surprise.
+ * En mode tactile, les commandes virtuelles (joystick, boutons, glisser pour viser)
+ * alimentent les mêmes actions via `setVirtualAction`, `setVirtualMouse`,
+ * `setMoveAxis` et `addLookDelta`.
  */
 
 export type Action =
@@ -48,6 +51,10 @@ export class InputManager {
   private mouseDY = 0;
   private wheelSteps = 0;
   private locked = false;
+  private touchMode = false;
+  private readonly virtualDown = new Set<Action>();
+  private readonly virtualPressed = new Set<Action>();
+  private readonly axis = { x: 0, y: 0 };
 
   /** Appelé quand le pointer lock change (true = verrouillé). */
   onPointerLockChange: ((locked: boolean) => void) | null = null;
@@ -76,6 +83,69 @@ export class InputManager {
     return this.locked;
   }
 
+  /** Vrai quand les commandes de jeu peuvent être lues (souris capturée ou mode tactile). */
+  get isActive(): boolean {
+    return this.locked || this.touchMode;
+  }
+
+  get isTouchMode(): boolean {
+    return this.touchMode;
+  }
+
+  setTouchMode(enabled: boolean): void {
+    this.touchMode = enabled;
+  }
+
+  // --- Entrées virtuelles (tactile) ------------------------------------------
+
+  setVirtualAction(action: Action, down: boolean): void {
+    if (down) {
+      if (!this.virtualDown.has(action)) this.virtualPressed.add(action);
+      this.virtualDown.add(action);
+    } else {
+      this.virtualDown.delete(action);
+    }
+  }
+
+  setVirtualMouse(button: number, down: boolean): void {
+    if (down) {
+      if (!this.mouseDown.has(button)) this.mousePressed.add(button);
+      this.mouseDown.add(button);
+    } else {
+      this.mouseDown.delete(button);
+    }
+  }
+
+  /** Axe analogique de déplacement (x = droite, y = avant), chaque composante dans [-1, 1]. */
+  setMoveAxis(x: number, y: number): void {
+    this.axis.x = x;
+    this.axis.y = y;
+  }
+
+  /** Ajoute un déplacement de visée exprimé en « pixels souris ». */
+  addLookDelta(dx: number, dy: number): void {
+    this.mouseDX += dx;
+    this.mouseDY += dy;
+  }
+
+  /** Relâche toutes les entrées virtuelles (pause, perte de focus). */
+  releaseVirtual(): void {
+    this.virtualDown.clear();
+    this.mouseDown.clear();
+    this.axis.x = 0;
+    this.axis.y = 0;
+  }
+
+  /** Déplacement combiné clavier + joystick (x = droite, y = avant). */
+  getMoveAxis(): { x: number; y: number } {
+    const kx = (this.isDown('right') ? 1 : 0) - (this.isDown('left') ? 1 : 0);
+    const ky = (this.isDown('forward') ? 1 : 0) - (this.isDown('back') ? 1 : 0);
+    return {
+      x: Math.max(-1, Math.min(1, kx + this.axis.x)),
+      y: Math.max(-1, Math.min(1, ky + this.axis.y)),
+    };
+  }
+
   requestPointerLock(): void {
     if (this.locked) return;
     try {
@@ -95,6 +165,7 @@ export class InputManager {
   }
 
   isDown(action: Action): boolean {
+    if (this.virtualDown.has(action)) return true;
     for (const code of BINDINGS[action]) {
       if (this.down.has(code)) return true;
     }
@@ -102,6 +173,7 @@ export class InputManager {
   }
 
   wasPressed(action: Action): boolean {
+    if (this.virtualPressed.has(action)) return true;
     for (const code of BINDINGS[action]) {
       if (this.pressed.has(code)) return true;
     }
@@ -135,6 +207,7 @@ export class InputManager {
   endFrame(): void {
     this.pressed.clear();
     this.mousePressed.clear();
+    this.virtualPressed.clear();
   }
 
   private isGameKey(code: string): boolean {
@@ -157,7 +230,7 @@ export class InputManager {
 
   private handleBlur = (): void => {
     this.down.clear();
-    this.mouseDown.clear();
+    this.releaseVirtual();
   };
 
   private handleMouseDown = (e: MouseEvent): void => {
@@ -167,6 +240,7 @@ export class InputManager {
   };
 
   private handleMouseUp = (e: MouseEvent): void => {
+    if (this.touchMode) return;
     this.mouseDown.delete(e.button);
   };
 

@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Physics } from '../core/Physics';
 import type { AudioSynthesizer } from '../core/AudioSynthesizer';
 import type { ParticleSystem } from '../effects/ParticleSystem';
 import type { PlayerController } from '../player/PlayerController';
 import { Beam } from '../effects/Beam';
+import { bakeGroup } from '../core/GeometryUtils';
 import { ENEMIES } from '../config';
 
 export type EnemyType = 'guard' | 'drone';
@@ -545,40 +545,6 @@ export class EnemyManager {
   // Construction des modèles
   // ---------------------------------------------------------------------------
 
-  /**
-   * Fusionne tous les meshes statiques d'un modèle par matériau (quelques draw calls
-   * par ennemi au lieu d'une vingtaine). Les objets de `keep` sont conservés tels quels.
-   */
-  private bake(body: THREE.Group, keep: THREE.Object3D[]): void {
-    body.updateMatrixWorld(true);
-    const inv = new THREE.Matrix4().copy(body.matrixWorld).invert();
-    const kept = keep.map((o) => ({ o, m: new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld) }));
-    const buckets = new Map<THREE.Material, THREE.BufferGeometry[]>();
-    body.traverse((obj) => {
-      if (!(obj instanceof THREE.Mesh) || keep.includes(obj)) return;
-      const g = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone();
-      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, obj.matrixWorld));
-      for (const name of Object.keys(g.attributes)) {
-        if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
-      }
-      const mat = obj.material as THREE.Material;
-      const list = buckets.get(mat) ?? [];
-      list.push(g);
-      buckets.set(mat, list);
-    });
-    body.clear();
-    for (const [mat, geos] of buckets) {
-      const merged = mergeGeometries(geos, false);
-      for (const g of geos) g.dispose();
-      if (merged) body.add(new THREE.Mesh(merged, mat));
-    }
-    for (const { o, m } of kept) {
-      o.removeFromParent();
-      m.decompose(o.position, o.quaternion, o.scale);
-      body.add(o);
-    }
-  }
-
   private createVisorMaterial(): THREE.MeshBasicMaterial {
     return new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.15, 0.25), toneMapped: false });
   }
@@ -641,7 +607,7 @@ export class EnemyManager {
     muzzle.position.set(0, 0.02, 0.6);
     rifle.add(muzzle);
     body.add(rifle);
-    this.bake(body, [muzzle]);
+    bakeGroup(body, [muzzle]);
 
     const laser = new Beam(0xff1030, 3);
 
@@ -703,7 +669,7 @@ export class EnemyManager {
     const muzzle = new THREE.Object3D();
     muzzle.position.set(0, -0.18, 0.34);
     body.add(muzzle);
-    this.bake(body, [muzzle, ...rotors]);
+    bakeGroup(body, [muzzle, ...rotors]);
 
     const laser = new Beam(0xff20b0, 3);
 

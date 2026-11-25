@@ -37,8 +37,10 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, pa
 
 /** Interface tête haute minimaliste + écrans (titre, pause, mort, arrivée). */
 export class HUD {
-  /** Appelé quand le joueur clique sur l'écran superposé. */
+  /** Appelé quand le joueur clique / touche l'écran superposé. */
   onOverlayClick: (() => void) | null = null;
+  /** Appelé par le bouton « Recommencer » de l'écran de pause. */
+  onRestartClick: (() => void) | null = null;
 
   private readonly root: HTMLDivElement;
   private readonly timer: HTMLDivElement;
@@ -56,8 +58,13 @@ export class HUD {
   private messageTimer: number | null = null;
   private hitTimer: number | null = null;
   private lastTimerText = '';
+  private readonly touch: boolean;
+  /** Instant d'affichage de l'écran superposé (anti « clic fantôme » sur mobile). */
+  private overlayShownAt = 0;
 
-  constructor(container: HTMLElement, dashMax: number, maxHealth: number) {
+  constructor(container: HTMLElement, dashMax: number, maxHealth: number, touch = false) {
+    this.touch = touch;
+    if (touch) document.body.classList.add('touch-mode');
     this.root = el('div', 'hud hidden', container);
 
     const top = el('div', 'hud-top', this.root);
@@ -96,7 +103,20 @@ export class HUD {
     el('div', 'hud-hint', this.root, 'R : RECOMMENCER · ÉCHAP : PAUSE');
 
     this.overlay = el('div', 'overlay', container);
-    this.overlay.addEventListener('click', () => this.onOverlayClick?.());
+    this.overlay.addEventListener('click', (e) => {
+      // Ignore le clic synthétique généré par le doigt qui vient d'ouvrir l'écran
+      if (performance.now() - this.overlayShownAt < 450) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-act="restart"]')) {
+        e.stopPropagation();
+        this.onRestartClick?.();
+        return;
+      }
+      this.onOverlayClick?.();
+    });
+
+    const rotate = el('div', 'rotate-hint', container);
+    rotate.innerHTML = '<div class="phone"></div><div>TOURNE TON APPAREIL EN MODE PAYSAGE</div>';
 
     this.setWeapon('blades');
   }
@@ -160,12 +180,7 @@ export class HUD {
   // ---------------------------------------------------------------------------
 
   showStart(best: number | null): void {
-    this.overlay.className = 'overlay show start';
-    this.overlay.innerHTML = `
-      <div class="panel">
-        <div class="title" data-text="NEON VERTIGO">NEON VERTIGO</div>
-        <div class="subtitle">PROTOTYPE // PARKOUR · LAMES · SANDEVISTAN</div>
-        <div class="controls">
+    const desktopControls = `
           <div><kbd>ZQSD</kbd>/<kbd>WASD</kbd><span>Courir</span></div>
           <div><kbd>Souris</kbd><span>Viser</span></div>
           <div><kbd>Espace</kbd><span>Saut · double saut · saut mural</span></div>
@@ -175,35 +190,57 @@ export class HUD {
           <div><kbd>Clic G</kbd><span>Attaquer / tirer</span></div>
           <div><kbd>Clic D</kbd><span>Sandevistan (ralenti)</span></div>
           <div><kbd>1</kbd>/<kbd>2</kbd><span>Lames Mantis / Pistolet</span></div>
-          <div><kbd>R</kbd><span>Recommencer instantanément</span></div>
-        </div>
+          <div><kbd>R</kbd><span>Recommencer instantanément</span></div>`;
+    const touchControls = `
+          <div><kbd>Pouce gauche</kbd><span>Joystick : courir</span></div>
+          <div><kbd>Pouce droit</kbd><span>Glisser : viser</span></div>
+          <div><kbd>SAUT</kbd><span>Saut · double saut · saut mural</span></div>
+          <div><kbd>GLISSE</kbd><span>Glissade (garde l'élan)</span></div>
+          <div><kbd>DASH</kbd><span>Dash aérien</span></div>
+          <div><kbd>ATTAQUE</kbd><span>Maintenir pour enchaîner, glisser pour viser</span></div>
+          <div><kbd>SANDEVISTAN</kbd><span>Ralenti</span></div>
+          <div><kbd>Joystick ↑</kbd><span>contre un mur en l'air : wall-run</span></div>
+          <div><kbd>ARME</kbd><span>Lames Mantis / Pistolet</span></div>
+          <div><kbd>↻</kbd> <kbd>❚❚</kbd><span>Recommencer · pause</span></div>`;
+    this.overlayShownAt = performance.now();
+    this.overlay.className = 'overlay show start';
+    this.overlay.innerHTML = `
+      <div class="panel">
+        <div class="title" data-text="NEON VERTIGO">NEON VERTIGO</div>
+        <div class="subtitle">PROTOTYPE // PARKOUR · LAMES · SANDEVISTAN</div>
+        <div class="controls">${this.touch ? touchControls : desktopControls}</div>
         <div class="objective">Rejoins la balise d'extraction dorée au bout des toits. Élimine les gardes et drones en un coup.</div>
         ${best !== null ? `<div class="best">RECORD : ${HUD.formatTime(best)}</div>` : ''}
-        <div class="cta">[ CLIQUE POUR TE CONNECTER ]</div>
+        <div class="cta">${this.touch ? '[ TOUCHE POUR TE CONNECTER ]' : '[ CLIQUE POUR TE CONNECTER ]'}</div>
+        ${this.touch ? '<div class="sub">Plein écran et mode paysage recommandés</div>' : ''}
       </div>`;
   }
 
   showPause(): void {
+    this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show pause';
     this.overlay.innerHTML = `
       <div class="panel small">
         <div class="title small">PAUSE</div>
-        <div class="cta">[ CLIQUE POUR REPRENDRE ]</div>
-        <div class="sub">R : recommencer</div>
+        <div class="cta">${this.touch ? '[ TOUCHE POUR REPRENDRE ]' : '[ CLIQUE POUR REPRENDRE ]'}</div>
+        <button class="overlay-btn" data-act="restart">↻ RECOMMENCER</button>
+        ${this.touch ? '' : '<div class="sub">R : recommencer</div>'}
       </div>`;
   }
 
   showDeath(time: number, kills: number, total: number): void {
+    this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show death';
     this.overlay.innerHTML = `
       <div class="panel small">
         <div class="title small glitch" data-text="FLATLINE">FLATLINE</div>
         <div class="stats">TEMPS ${HUD.formatTime(time)} · CIBLES ${kills}/${total}</div>
-        <div class="cta">[ R ] REDÉMARRER</div>
+        <div class="cta">${this.touch ? '[ TOUCHE POUR REDÉMARRER ]' : '[ R ] REDÉMARRER'}</div>
       </div>`;
   }
 
   showFinish(s: FinishStats): void {
+    this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show finish';
     this.overlay.innerHTML = `
       <div class="panel small">
@@ -211,11 +248,12 @@ export class HUD {
         <div class="big-time">${HUD.formatTime(s.time)}</div>
         <div class="stats">${s.isRecord ? '★ NOUVEAU RECORD ★' : `RECORD : ${s.best !== null ? HUD.formatTime(s.best) : '--'}`}</div>
         <div class="stats">CIBLES ÉLIMINÉES ${s.kills}/${s.totalEnemies}</div>
-        <div class="cta">[ R ] REJOUER</div>
+        <div class="cta">${this.touch ? '[ TOUCHE POUR REJOUER ]' : '[ R ] REJOUER'}</div>
       </div>`;
   }
 
   showLoading(text: string): void {
+    this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show';
     this.overlay.innerHTML = `<div class="panel small"><div class="cta">${text}</div></div>`;
   }

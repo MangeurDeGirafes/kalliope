@@ -547,3 +547,354 @@ kbd {
     width: 200px;
   }
 }
+
+.overlay-btn {
+  margin-top: 18px;
+  padding: 10px 22px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.25em;
+  color: var(--magenta);
+  background: rgba(30, 0, 25, 0.5);
+  border: 1px solid var(--magenta);
+  box-shadow: 0 0 12px rgba(255, 43, 214, 0.35);
+  cursor: pointer;
+}
+
+/* ================================================================ MOBILE */
+
+body.touch-mode {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+/* HUD compact : jauges en haut à gauche, armes affichées sur le bouton d'attaque */
+.touch-mode .hud-left {
+  top: calc(10px + env(safe-area-inset-top));
+  left: calc(14px + env(safe-area-inset-left));
+  bottom: auto;
+  width: 170px;
+}
+.touch-mode .hud-left .label {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+}
+.touch-mode .hud-left .row {
+  margin-top: 3px;
+}
+.touch-mode .hud-left .row .label {
+  width: 72px;
+}
+.touch-mode .hud-left .bar {
+  margin: 3px 0 4px;
+  height: 6px;
+}
+.touch-mode .pip {
+  width: 18px;
+  height: 6px;
+}
+.touch-mode .hud-top {
+  top: calc(8px + env(safe-area-inset-top));
+}
+.touch-mode .hud-timer {
+  font-size: 22px;
+}
+.touch-mode .hud-targets {
+  font-size: 11px;
+}
+.touch-mode .hud-right,
+.touch-mode .hud-hint {
+  display: none;
+}
+.touch-mode .hud-message {
+  font-size: 18px;
+  top: 26%;
+}
+
+/* Écrans plus compacts sur petit écran */
+.touch-mode .panel {
+  touch-action: pan-y;
+  padding: 18px 20px;
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+}
+.touch-mode .controls {
+  margin: 14px 0 10px;
+  gap: 4px 18px;
+  font-size: 14px;
+}
+.touch-mode kbd {
+  font-size: 11px;
+}
+.touch-mode .objective {
+  font-size: 13px;
+}
+.touch-mode .cta {
+  margin-top: 12px;
+  font-size: 14px;
+}
+@media (max-height: 430px) {
+  .touch-mode .title {
+    font-size: 30px;
+  }
+  .touch-mode .subtitle {
+    font-size: 10px;
+  }
+}
+
+/* Message d'orientation (portrait) */
+.rotate-hint {
+  display: none;
+}
+@media (orientation: portrait) {
+  .touch-mode .rotate-hint {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    padding: 24px;
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: 15px;
+    letter-spacing: 0.25em;
+    color: var(--cyan);
+    text-shadow: 0 0 10px var(--cyan);
+    background: rgba(5, 3, 10, 0.94);
+  }
+  .rotate-hint .phone {
+    width: 46px;
+    height: 78px;
+    border: 3px solid var(--magenta);
+    border-radius: 8px;
+    box-shadow: 0 0 14px var(--magenta);
+    animation: rotate-phone 1.8s ease-in-out infinite;
+  }
+}
+@keyframes rotate-phone {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  60%,
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+
+/* ------------------------------------------------------- Commandes tactiles */
+
+.touch-ui {
+  --u: 1;
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  touch-action: none;
+  user-select: none;
+}
+.touch-ui.hidden {
+  display: none;
+}
+@media (max-height: 400px) {
+  .touch-ui {
+    --u: 0.84;
+  }
+}
+
+.touch-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  touch-action: none;
+}
+.joy-zone {
+  left: 0;
+  width: 45%;
+}
+.look-zone {
+  right: 0;
+  width: 55%;
+}
+
+.joy-base {
+  position: absolute;
+  width: calc(var(--u) * 116px);
+  height: calc(var(--u) * 116px);
+  margin: calc(var(--u) * -58px) 0 0 calc(var(--u) * -58px);
+  border-radius: 50%;
+  border: 2px solid rgba(0, 229, 255, 0.55);
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.12), rgba(0, 20, 30, 0.25) 70%);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.25), inset 0 0 18px rgba(0, 229, 255, 0.15);
+  pointer-events: none;
+}
+.joy-base.idle {
+  left: calc(env(safe-area-inset-left) + var(--u) * 96px);
+  top: calc(100% - env(safe-area-inset-bottom) - var(--u) * 96px);
+  opacity: 0.45;
+}
+.joy-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--u) * 52px);
+  height: calc(var(--u) * 52px);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.55), rgba(0, 229, 255, 0.5) 45%, rgba(0, 80, 110, 0.6));
+  box-shadow: 0 0 16px var(--cyan);
+}
+.joy-hint {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+  opacity: 0.7;
+}
+.joy-base:not(.idle) .joy-hint {
+  display: none;
+}
+
+.look-hint {
+  position: absolute;
+  right: 26%;
+  top: 46%;
+  font-size: 11px;
+  letter-spacing: 0.35em;
+  color: rgba(232, 246, 255, 0.45);
+  pointer-events: none;
+  transition: opacity 0.6s;
+}
+.look-hint.gone {
+  opacity: 0;
+}
+
+.touch-btn {
+  --size: 58px;
+  position: absolute;
+  width: calc(var(--u) * var(--size));
+  height: calc(var(--u) * var(--size));
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--cyan);
+  background: radial-gradient(circle, rgba(10, 20, 35, 0.55), rgba(5, 8, 16, 0.75));
+  border: 2px solid rgba(0, 229, 255, 0.6);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.3), inset 0 0 12px rgba(0, 229, 255, 0.12);
+  touch-action: none;
+  transition: transform 0.06s, background 0.06s;
+}
+.touch-btn .icon {
+  width: 46%;
+  height: 46%;
+  display: block;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+.touch-btn .icon svg {
+  width: 100%;
+  height: 100%;
+}
+.touch-btn .label {
+  position: absolute;
+  bottom: calc(var(--u) * -15px);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  white-space: nowrap;
+  color: rgba(232, 246, 255, 0.75);
+  text-shadow: 0 0 4px #000;
+}
+.touch-btn.pressed {
+  transform: scale(0.9);
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.45), rgba(0, 60, 80, 0.7));
+  color: #fff;
+}
+
+.tb-attack {
+  --size: 88px;
+  right: calc(env(safe-area-inset-right) + var(--u) * 26px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 34px);
+  color: var(--magenta);
+  border-color: rgba(255, 43, 214, 0.75);
+  box-shadow: 0 0 16px rgba(255, 43, 214, 0.4), inset 0 0 14px rgba(255, 43, 214, 0.15);
+}
+.tb-attack.pressed {
+  background: radial-gradient(circle, rgba(255, 43, 214, 0.5), rgba(80, 0, 60, 0.7));
+}
+.tb-jump {
+  --size: 74px;
+  right: calc(env(safe-area-inset-right) + var(--u) * 132px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 22px);
+}
+.tb-slide {
+  right: calc(env(safe-area-inset-right) + var(--u) * 222px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 28px);
+}
+.tb-dash {
+  right: calc(env(safe-area-inset-right) + var(--u) * 142px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 118px);
+}
+.tb-dash.empty {
+  opacity: 0.4;
+}
+.tb-dash::after {
+  content: attr(data-charges);
+  position: absolute;
+  top: calc(var(--u) * -4px);
+  right: calc(var(--u) * -4px);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  color: #fff;
+  background: var(--magenta);
+  box-shadow: 0 0 8px var(--magenta);
+}
+.tb-sandevistan {
+  --energy: 100;
+  right: calc(env(safe-area-inset-right) + var(--u) * 42px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 146px);
+  color: var(--green);
+  border-color: transparent;
+  background:
+    radial-gradient(circle, rgba(5, 20, 16, 0.8) 62%, transparent 63%),
+    conic-gradient(var(--green) calc(var(--energy) * 1%), rgba(43, 255, 176, 0.15) 0);
+  box-shadow: 0 0 12px rgba(43, 255, 176, 0.3);
+}
+.tb-sandevistan.active {
+  color: #fff;
+  box-shadow: 0 0 22px var(--green);
+  animation: blink 0.4s infinite alternate;
+}
+.tb-swap {
+  --size: 48px;
+  right: calc(env(safe-area-inset-right) + var(--u) * 232px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 112px);
+  color: var(--yellow);
+  border-color: rgba(255, 210, 59, 0.6);
+}
+.tb-pause,
+.tb-restart {
+  --size: 40px;
+  top: calc(env(safe-area-inset-top) + 10px);
+  color: rgba(232, 246, 255, 0.8);
+  border-color: rgba(232, 246, 255, 0.35);
+  box-shadow: none;
+}
+.tb-pause {
+  right: calc(env(safe-area-inset-right) + 14px);
+}
+.tb-restart {
+  right: calc(env(safe-area-inset-right) + 62px);
+}

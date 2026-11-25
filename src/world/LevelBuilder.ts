@@ -15,6 +15,7 @@ import {
   scaleBoxUVs,
 } from './Textures';
 import { WORLD } from '../config';
+import { QUALITY } from '../core/Device';
 
 export interface JumpPad {
   position: THREE.Vector3;
@@ -635,6 +636,8 @@ export class LevelBuilder {
   }
 
   private addNeonLight(position: THREE.Vector3, color: number, intensity: number, distance: number): void {
+    // Sur mobile, chaque lumière ponctuelle alourdit tous les shaders : on s'en passe.
+    if (!QUALITY.neonLights) return;
     const light = new THREE.PointLight(color, intensity, distance, 1.6);
     light.position.copy(position);
     this.scene.add(light);
@@ -860,7 +863,7 @@ export class LevelBuilder {
 
   private buildTraffic(): void {
     const rng = createRng(99);
-    const count = WORLD.trafficCount;
+    const count = QUALITY.trafficCount;
     const bodyGeo = new THREE.BoxGeometry(1.8, 0.6, 4.2);
     const headGeo = new THREE.BoxGeometry(1.5, 0.14, 0.08).translate(0, 0.05, -2.12);
     const tailGeo = new THREE.BoxGeometry(1.6, 0.12, 0.08).translate(0, 0.05, 2.12);

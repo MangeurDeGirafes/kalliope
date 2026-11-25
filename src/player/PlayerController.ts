@@ -74,6 +74,8 @@ export class PlayerController {
   private dashRecharge = 0;
   private readonly dashDir = new THREE.Vector3();
   private mantleCooldown = 0;
+  /** Intensité de l'entrée de déplacement (1 au clavier, analogique au joystick). */
+  private moveScale = 0;
   private lungeTimer = 0;
   private readonly lungeVelocity = new THREE.Vector3();
   private invulnerable = 0;
@@ -314,17 +316,22 @@ export class PlayerController {
 
     this.updateSandevistan(realDt, controlsEnabled && input.wasMousePressed(MouseButton.Right));
 
+    // Clavier (numérique) ou joystick tactile (analogique)
     let fwdIn = 0;
     let strafeIn = 0;
     if (controlsEnabled) {
-      fwdIn = (input.isDown('forward') ? 1 : 0) - (input.isDown('back') ? 1 : 0);
-      strafeIn = (input.isDown('right') ? 1 : 0) - (input.isDown('left') ? 1 : 0);
+      const axis = input.getMoveAxis();
+      fwdIn = axis.y;
+      strafeIn = axis.x;
     }
     this.forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     this.wish.set(0, 0, 0).addScaledVector(this.forward, fwdIn).addScaledVector(this.right, strafeIn);
-    const hasWish = this.wish.lengthSq() > 0;
-    if (hasWish) this.wish.normalize();
+    const wishLength = this.wish.length();
+    const hasWish = wishLength > 0.01;
+    this.moveScale = Math.min(1, wishLength);
+    if (hasWish) this.wish.divideScalar(wishLength);
+    const pushingForward = fwdIn > MOVEMENT.forwardInputThreshold;
 
     const jumpPressed = controlsEnabled && input.wasPressed('jump');
     const dashPressed = controlsEnabled && input.wasPressed('dash');
@@ -345,7 +352,7 @@ export class PlayerController {
       this.velocity.copy(this.dashDir).multiplyScalar(DASH.speed);
       if (this.dashTimer <= 0) this.endDash();
     } else if (this.wallRunning) {
-      this.updateWallRun(dt, fwdIn);
+      this.updateWallRun(dt, pushingForward);
     } else if (this.grounded) {
       this.updateGround(dt, hasWish);
     } else {
@@ -358,8 +365,8 @@ export class PlayerController {
     if (this.jumpBuffer > 0 && this.grounded && !this.dashing) this.groundJump();
 
     if (!this.grounded && !this.wallRunning && !this.dashing) {
-      if (fwdIn > 0) this.tryStartWallRun();
-      if (fwdIn > 0 && !this.wallRunning) this.tryMantle();
+      if (pushingForward) this.tryStartWallRun();
+      if (pushingForward && !this.wallRunning) this.tryMantle();
     }
 
     // Gravité
@@ -428,7 +435,7 @@ export class PlayerController {
       return;
     }
 
-    const maxSpeed = this.crouched ? SLIDE.crouchSpeed : MOVEMENT.runSpeed;
+    const maxSpeed = (this.crouched ? SLIDE.crouchSpeed : MOVEMENT.runSpeed) * this.moveScale;
     const rate = hasWish ? MOVEMENT.groundAccel : MOVEMENT.groundFriction;
     const k = 1 - Math.exp(-rate * dt);
     const tx = this.wish.x * maxSpeed;
@@ -650,7 +657,7 @@ export class PlayerController {
     this.audio.setWallRunning(true);
   }
 
-  private updateWallRun(dt: number, fwdIn: number): void {
+  private updateWallRun(dt: number, pushingForward: boolean): void {
     this.wallRunTimer += dt;
     this.tmp2.copy(this.wallNormal).negate();
     const hit = this.physics.raycast(this.position, this.tmp2, PLAYER.radius + WALLRUN.detectDistance + 0.35);
@@ -671,7 +678,7 @@ export class PlayerController {
     this.velocity.x = along.x * alongSpeed - this.wallNormal.x * WALLRUN.stickVelocity;
     this.velocity.z = along.z * alongSpeed - this.wallNormal.z * WALLRUN.stickVelocity;
 
-    if (this.wallRunTimer > WALLRUN.maxDuration || fwdIn <= 0 || alongSpeed < WALLRUN.minSpeed * 0.5) {
+    if (this.wallRunTimer > WALLRUN.maxDuration || !pushingForward || alongSpeed < WALLRUN.minSpeed * 0.5) {
       this.endWallRun(true);
     }
   }
