@@ -14,7 +14,7 @@ import {
   createWindowTexture,
   scaleBoxUVs,
 } from './Textures';
-import { WORLD } from '../config';
+import { LIGHTING, WORLD } from '../config';
 import { QUALITY } from '../core/Device';
 
 export interface JumpPad {
@@ -100,7 +100,7 @@ export class LevelBuilder {
           metalness: 0.5,
           emissive: 0xffffff,
           emissiveMap: tex,
-          emissiveIntensity: 0.9,
+          emissiveIntensity: 0.9 * LIGHTING.windows,
         }),
       );
     }
@@ -263,7 +263,8 @@ export class LevelBuilder {
     }
     if (this.blinkMaterial) {
       const on = Math.sin(t * 3) > 0.6;
-      this.blinkMaterial.color.setRGB(on ? 6 : 0.4, on ? 0.2 : 0.02, on ? 0.2 : 0.02);
+      const b = LIGHTING.neon;
+      this.blinkMaterial.color.setRGB((on ? 6 : 0.4) * b, (on ? 0.2 : 0.02) * b, (on ? 0.2 : 0.02) * b);
     }
 
     this.updateTraffic(dt);
@@ -278,7 +279,7 @@ export class LevelBuilder {
     const key = color * 10 + intensity;
     let m = this.neonMaterials.get(key);
     if (!m) {
-      m = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(intensity), toneMapped: false });
+      m = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(intensity * LIGHTING.neon), toneMapped: false });
       this.neonMaterials.set(key, m);
     }
     return m;
@@ -421,7 +422,7 @@ export class LevelBuilder {
     this.batchBox(this.darkMaterial, 0.8, 0.05, 0.05, x, top + height * 0.7, z);
     this.batchBox(this.darkMaterial, 0.6, 0.05, 0.05, x, top + height * 0.85, z);
     if (!this.blinkMaterial) {
-      this.blinkMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.2, 0.2), toneMapped: false });
+      this.blinkMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.2, 0.2).multiplyScalar(LIGHTING.neon), toneMapped: false });
     }
     this.batchBox(this.blinkMaterial, 0.18, 0.18, 0.18, x, top + height + 0.1, z);
     this.physics.addBox(new THREE.Vector3(x, top + height / 2, z), new THREE.Vector3(0.1, height / 2, 0.1));
@@ -457,7 +458,7 @@ export class LevelBuilder {
     const adHeight = 7;
     const adCenterY = top - 4.2;
     const ad = createAdTexture(title, subtitle, faceDir > 0 ? '#00b8ff' : '#ff2bd6', faceDir > 0 ? '#7a2bff' : '#ff8a2b', seed);
-    const adMat = new THREE.MeshBasicMaterial({ map: ad, color: new THREE.Color(1.0, 1.0, 1.0) });
+    const adMat = new THREE.MeshBasicMaterial({ map: ad, color: new THREE.Color(1, 1, 1).multiplyScalar(LIGHTING.signs) });
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(length - 0.4, adHeight), adMat);
     plane.position.set(faceX, adCenterY, cz);
     plane.rotation.y = faceDir > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -494,7 +495,7 @@ export class LevelBuilder {
 
     const geo = new THREE.BoxGeometry(width, h, thickness);
     const ad = createAdTexture('▼ GLISSE ▼', 'C / CTRL — PASSE DESSOUS', '#ff8a2b', '#ff2040', 5 + Math.round(z));
-    const adMat = new THREE.MeshBasicMaterial({ map: ad, color: new THREE.Color(1.05, 1.05, 1.05) });
+    const adMat = new THREE.MeshBasicMaterial({ map: ad, color: new THREE.Color(1, 1, 1).multiplyScalar(1.05 * LIGHTING.signs) });
     const mesh = new THREE.Mesh(geo, [this.panelMaterial, this.panelMaterial, this.panelMaterial, this.panelMaterial, adMat, adMat]);
     mesh.position.set(cx, cy, z);
     this.scene.add(mesh);
@@ -522,7 +523,7 @@ export class LevelBuilder {
     base.position.set(position.x, position.y + 0.04, position.z);
     this.scene.add(base);
 
-    const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(NEON.green).multiplyScalar(4), toneMapped: false });
+    const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(NEON.green).multiplyScalar(4 * LIGHTING.neon), toneMapped: false });
     const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.06, 8, 48, Math.PI * 1.6), ringMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(position.x, position.y + 0.1, position.z);
@@ -536,7 +537,7 @@ export class LevelBuilder {
       uniforms: {
         uTime: { value: 0 },
         uBoost: { value: 0 },
-        uColor: { value: new THREE.Color(NEON.green).multiplyScalar(2.5) },
+        uColor: { value: new THREE.Color(NEON.green).multiplyScalar(2.5 * LIGHTING.neon) },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -571,7 +572,7 @@ export class LevelBuilder {
   private addFinishBeacon(position: THREE.Vector3): void {
     this.exclusions.push({ x: position.x, z: position.z, r: 4.5 });
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(NEON.yellow).multiplyScalar(2.2) } },
+      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(NEON.yellow).multiplyScalar(2.2 * LIGHTING.neon) } },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
         void main() {
@@ -601,7 +602,7 @@ export class LevelBuilder {
     column.position.set(position.x, position.y + 70, position.z);
     this.scene.add(column);
 
-    const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(NEON.yellow).multiplyScalar(4), toneMapped: false });
+    const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(NEON.yellow).multiplyScalar(4 * LIGHTING.neon), toneMapped: false });
     for (let i = 0; i < 2; i++) {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(2.6 + i * 0.5, 0.06, 8, 64, Math.PI * (1.2 + i * 0.4)), ringMat);
       ring.rotation.x = -Math.PI / 2;
@@ -612,7 +613,7 @@ export class LevelBuilder {
       this.spinners.push({ object: holder, speed: i === 0 ? 1.2 : -0.8 });
     }
     this.addHoloSign(['◆ EXTRACTION ◆'], new THREE.Vector3(position.x, position.y + 4.5, position.z), NEON.yellow, 5);
-    const light = new THREE.PointLight(NEON.yellow, 18, 25, 2);
+    const light = new THREE.PointLight(NEON.yellow, 18 * LIGHTING.pointLights, 25, 2);
     light.position.set(position.x, position.y + 3, position.z);
     this.scene.add(light);
   }
@@ -622,7 +623,7 @@ export class LevelBuilder {
     const { texture, aspect } = createHoloTexture(lines, hex);
     const mat = new THREE.SpriteMaterial({
       map: texture,
-      color: new THREE.Color(1.6, 1.6, 1.6),
+      color: new THREE.Color(1, 1, 1).multiplyScalar(1.6 * LIGHTING.signs),
       transparent: true,
       depthWrite: false,
       opacity: 0.92,
@@ -638,7 +639,7 @@ export class LevelBuilder {
   private addNeonLight(position: THREE.Vector3, color: number, intensity: number, distance: number): void {
     // Sur mobile, chaque lumière ponctuelle alourdit tous les shaders : on s'en passe.
     if (!QUALITY.neonLights) return;
-    const light = new THREE.PointLight(color, intensity, distance, 1.6);
+    const light = new THREE.PointLight(color, intensity * LIGHTING.pointLights, distance, 1.6);
     light.position.copy(position);
     this.scene.add(light);
   }
@@ -662,7 +663,7 @@ export class LevelBuilder {
       const hex = '#' + new THREE.Color(color).getHexString();
       const vertical = text.length <= 4;
       const tex = createSignTexture(text, hex, vertical);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1.8, 1.8, 1.8), transparent: true });
+      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1, 1, 1).multiplyScalar(1.8 * LIGHTING.signs), transparent: true });
       const w = vertical ? 1.6 : 6;
       const h = vertical ? 6.4 : 1.5;
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
@@ -808,14 +809,14 @@ export class LevelBuilder {
       return g;
     };
     const cityMat = this.windowMaterials[1].clone();
-    cityMat.emissiveIntensity = 1.1;
+    cityMat.emissiveIntensity = 1.1 * LIGHTING.windows;
     this.scene.add(new THREE.Mesh(buildGeo(sides), cityMat));
     this.scene.add(new THREE.Mesh(buildGeo(tops), this.darkMaterial));
 
     // Feux d'obstacle aérien clignotants
     if (blinkers.length > 0) {
       if (!this.blinkMaterial) {
-        this.blinkMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.2, 0.2), toneMapped: false });
+        this.blinkMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.2, 0.2).multiplyScalar(LIGHTING.neon), toneMapped: false });
       }
       const inst = new THREE.InstancedMesh(new THREE.SphereGeometry(0.9, 8, 6), this.blinkMaterial, blinkers.length);
       blinkers.forEach((p, i) => {
@@ -834,7 +835,7 @@ export class LevelBuilder {
       const color = colors[Math.floor(rng() * colors.length)];
       const vertical = text.length <= 4;
       const tex = createSignTexture(text, color, vertical);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(2.2, 2.2, 2.2), transparent: true });
+      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1, 1, 1).multiplyScalar(2.2 * LIGHTING.signs), transparent: true });
       const scale = 3 + rng() * 3;
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? scale : scale * 4, vertical ? scale * 4 : scale), mat);
       plane.position.set(s.x, s.y, s.z);
@@ -852,7 +853,7 @@ export class LevelBuilder {
     ];
     ads.forEach(([title, sub, a, b], i) => {
       const tex = createAdTexture(title, sub, a, b, 900 + i);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1.15, 1.15, 1.15), side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1, 1, 1).multiplyScalar(1.15 * LIGHTING.signs), side: THREE.DoubleSide });
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(48, 24), mat);
       const side = i % 2 === 0 ? 1 : -1;
       plane.position.set(side * 42, 32 + i * 6, -60 - i * 85);
@@ -869,9 +870,9 @@ export class LevelBuilder {
     const tailGeo = new THREE.BoxGeometry(1.6, 0.12, 0.08).translate(0, 0.05, 2.12);
     const underGeo = new THREE.BoxGeometry(1.2, 0.04, 3.4).translate(0, -0.32, 0);
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x15151c, metalness: 0.9, roughness: 0.3 });
-    const headMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 6, 5.5), toneMapped: false });
-    const tailMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.3, 0.4), toneMapped: false });
-    const underMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 2.5, 4), toneMapped: false });
+    const headMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 6, 5.5).multiplyScalar(LIGHTING.neon), toneMapped: false });
+    const tailMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.3, 0.4).multiplyScalar(LIGHTING.neon), toneMapped: false });
+    const underMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 2.5, 4).multiplyScalar(LIGHTING.neon), toneMapped: false });
     const meshes = [
       new THREE.InstancedMesh(bodyGeo, bodyMat, count),
       new THREE.InstancedMesh(headGeo, headMat, count),
@@ -918,7 +919,7 @@ export class LevelBuilder {
   private addStreetGlow(): void {
     const tex = createStreetTexture();
     tex.repeat.set(8, 8);
-    const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1.4, 1.4, 1.4) });
+    const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1, 1, 1).multiplyScalar(1.4 * LIGHTING.signs) });
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), mat);
     plane.rotation.x = -Math.PI / 2;
     plane.position.set(0, BASE_Y, -200);

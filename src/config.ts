@@ -189,11 +189,37 @@ export const WORLD = {
   fogDensity: 0.0068,
 } as const;
 
+/**
+ * Intensité des lumières, néons et halos. Les multiplicateurs valent 1 pour
+ * l'intensité d'origine : baisse-les pour adoucir l'image, monte-les pour l'inverse.
+ */
+export const LIGHTING = {
+  /** Halo lumineux (bloom) autour des zones claires. */
+  bloomStrength: 0.42,
+  bloomRadius: 0.35,
+  /** Luminosité à partir de laquelle un pixel « bave » (plus haut = moins de halo). */
+  bloomThreshold: 0.95,
+  /** Exposition globale de l'image. */
+  exposure: 0.82,
+  /** Liserés néon des toits, bandes des murs, tremplins, balise d'arrivée, feux. */
+  neon: 0.55,
+  /** Fenêtres éclairées des immeubles. */
+  windows: 0.6,
+  /** Enseignes, affiches publicitaires et panneaux holographiques. */
+  signs: 0.65,
+  /** Lumières ponctuelles colorées du décor. */
+  pointLights: 0.5,
+  /** Néons des armes, traînée des lames, tirs du pistolet. */
+  weaponGlow: 0.6,
+  /** Visières, lasers de visée et projectiles ennemis. */
+  enemyGlow: 0.65,
+  /** Particules, flashs et lumières d'explosion. */
+  effects: 0.6,
+  /** Reflets colorés de l'environnement sur les surfaces métalliques. */
+  environment: 0.6,
+} as const;
+
 export const GRAPHICS = {
-  bloomStrength: 0.7,
-  bloomRadius: 0.45,
-  bloomThreshold: 0.8,
-  exposure: 0.95,
   /** Résolution dynamique : temps de frame visé et seuils d'ajustement (s). */
   targetFrameTime: 1 / 58,
   slowFrameTime: 1 / 45,

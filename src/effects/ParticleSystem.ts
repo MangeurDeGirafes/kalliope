@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { QUALITY } from '../core/Device';
+import { LIGHTING } from '../config';
 
 export interface BurstOptions {
   count: number;
@@ -144,7 +145,7 @@ export class ParticleSystem {
   burst(position: THREE.Vector3, o: BurstOptions): void {
     const c1 = this.tmpColor.set(o.color);
     const c2 = this.tmpColor2.set(o.color2 ?? o.color);
-    const intensity = o.intensity ?? 3;
+    const intensity = (o.intensity ?? 3) * LIGHTING.effects;
     const spread = o.spread ?? 1;
     for (let k = 0; k < o.count; k++) {
       const i = this.cursor;
@@ -191,7 +192,7 @@ export class ParticleSystem {
     slot.sprite.position.copy(position);
     slot.sprite.visible = true;
     const mat = slot.sprite.material;
-    mat.color.set(color).multiplyScalar(intensity);
+    mat.color.set(color).multiplyScalar(intensity * LIGHTING.effects);
     mat.opacity = 1;
     slot.sprite.scale.setScalar(startScale);
   }
@@ -210,8 +211,8 @@ export class ParticleSystem {
     slot.light.color.set(color);
     slot.life = life;
     slot.maxLife = life;
-    slot.peak = peak;
-    slot.light.intensity = peak;
+    slot.peak = peak * LIGHTING.effects;
+    slot.light.intensity = slot.peak;
   }
 
   /** Explosion standard d'un ennemi détruit. */

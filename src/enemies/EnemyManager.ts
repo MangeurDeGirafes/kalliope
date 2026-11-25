@@ -5,7 +5,7 @@ import type { ParticleSystem } from '../effects/ParticleSystem';
 import type { PlayerController } from '../player/PlayerController';
 import { Beam } from '../effects/Beam';
 import { bakeGroup } from '../core/GeometryUtils';
-import { ENEMIES } from '../config';
+import { ENEMIES, LIGHTING } from '../config';
 
 export type EnemyType = 'guard' | 'drone';
 
@@ -84,14 +84,14 @@ export class EnemyManager {
   private readonly accentRedMat = new THREE.MeshStandardMaterial({
     color: 0x220004,
     emissive: 0xff1030,
-    emissiveIntensity: 2.2,
+    emissiveIntensity: 2.2 * LIGHTING.enemyGlow,
     metalness: 0.4,
     roughness: 0.4,
   });
   private readonly accentMagentaMat = new THREE.MeshStandardMaterial({
     color: 0x200018,
     emissive: 0xff20c0,
-    emissiveIntensity: 2.4,
+    emissiveIntensity: 2.4 * LIGHTING.enemyGlow,
     metalness: 0.4,
     roughness: 0.4,
   });
@@ -247,8 +247,8 @@ export class EnemyManager {
       p.velocity.copy(dir).multiplyScalar(speed);
       p.friendly = true;
       p.life = ENEMIES.projectileLifetime;
-      p.coreMaterial.color.copy(FRIENDLY_CYAN).multiplyScalar(6);
-      p.glowMaterial.color.copy(FRIENDLY_CYAN).multiplyScalar(2.5);
+      p.coreMaterial.color.copy(FRIENDLY_CYAN).multiplyScalar(6 * LIGHTING.enemyGlow);
+      p.glowMaterial.color.copy(FRIENDLY_CYAN).multiplyScalar(2.5 * LIGHTING.enemyGlow);
       this.particles.sparks(p.group.position, forward, 0x40e0ff, 26);
       count++;
     }
@@ -370,7 +370,7 @@ export class EnemyManager {
           e.state = 'cooldown';
           e.timer = 0.6;
           e.laser.mesh.visible = false;
-          e.visorMaterial.color.setRGB(4, 0.15, 0.25);
+          this.setVisor(e, 4);
           break;
         }
         e.timer -= dt;
@@ -427,7 +427,7 @@ export class EnemyManager {
     e.laser.set(muzzle, end, 0.006 + progress * 0.016);
     e.laser.setIntensity((0.7 + progress * 1.3) * blink);
     e.laser.setOpacity(0.3 + progress * 0.6);
-    e.visorMaterial.color.setRGB(4 + progress * 6, 0.15, 0.25);
+    this.setVisor(e, 4 + progress * 6);
   }
 
   private fire(e: Enemy, muzzle: THREE.Vector3, speed: number): void {
@@ -443,10 +443,10 @@ export class EnemyManager {
     p.group.position.copy(muzzle);
     p.group.visible = true;
     const color = e.type === 'guard' ? GUARD_RED : DRONE_MAGENTA;
-    p.coreMaterial.color.copy(color).multiplyScalar(6);
-    p.glowMaterial.color.copy(color).multiplyScalar(2.2);
+    p.coreMaterial.color.copy(color).multiplyScalar(6 * LIGHTING.enemyGlow);
+    p.glowMaterial.color.copy(color).multiplyScalar(2.2 * LIGHTING.enemyGlow);
     this.particles.flash(muzzle, color, 0.2, 1.2, 0.12, 4);
-    e.visorMaterial.color.setRGB(4, 0.15, 0.25);
+    this.setVisor(e, 4);
   }
 
   private updateProjectiles(dt: number, player: PlayerController): void {
@@ -545,8 +545,13 @@ export class EnemyManager {
   // Construction des modèles
   // ---------------------------------------------------------------------------
 
+  /** Visière rouge : `level` ≈ 4 au repos, jusqu'à 10 juste avant le tir. */
+  private setVisor(e: Enemy, level: number): void {
+    e.visorMaterial.color.setRGB(level, 0.15, 0.25).multiplyScalar(LIGHTING.enemyGlow);
+  }
+
   private createVisorMaterial(): THREE.MeshBasicMaterial {
-    return new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.15, 0.25), toneMapped: false });
+    return new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.15, 0.25).multiplyScalar(LIGHTING.enemyGlow), toneMapped: false });
   }
 
   private box(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
@@ -609,7 +614,7 @@ export class EnemyManager {
     body.add(rifle);
     bakeGroup(body, [muzzle]);
 
-    const laser = new Beam(0xff1030, 3);
+    const laser = new Beam(0xff1030, 3 * LIGHTING.enemyGlow);
 
     return {
       type: 'guard',
@@ -671,7 +676,7 @@ export class EnemyManager {
     body.add(muzzle);
     bakeGroup(body, [muzzle, ...rotors]);
 
-    const laser = new Beam(0xff20b0, 3);
+    const laser = new Beam(0xff20b0, 3 * LIGHTING.enemyGlow);
 
     return {
       type: 'drone',
@@ -698,9 +703,9 @@ export class EnemyManager {
 
   private createProjectile(): Projectile {
     const group = new THREE.Group();
-    const coreMaterial = new THREE.MeshBasicMaterial({ color: GUARD_RED.clone().multiplyScalar(6), toneMapped: false });
+    const coreMaterial = new THREE.MeshBasicMaterial({ color: GUARD_RED.clone().multiplyScalar(6 * LIGHTING.enemyGlow), toneMapped: false });
     const glowMaterial = new THREE.MeshBasicMaterial({
-      color: GUARD_RED.clone().multiplyScalar(2),
+      color: GUARD_RED.clone().multiplyScalar(2 * LIGHTING.enemyGlow),
       transparent: true,
       opacity: 0.6,
       blending: THREE.AdditiveBlending,

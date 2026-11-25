@@ -12,7 +12,7 @@ import { BladeTrail } from '../effects/BladeTrail';
 import { createRadialTexture } from '../effects/ParticleSystem';
 import { MantisArm, armPose, createArmPose, lerpArmPose, mirrorArmPose } from './MantisBladeModel';
 import type { ArmPose } from './MantisBladeModel';
-import { BLADES, PISTOL, TOUCH } from '../config';
+import { BLADES, LIGHTING, PISTOL, TOUCH } from '../config';
 
 export type WeaponId = 'blades' | 'pistol';
 
@@ -143,7 +143,7 @@ export class WeaponManager {
     // Flash de bouche
     const flashMat = new THREE.MeshBasicMaterial({
       map: createRadialTexture(),
-      color: new THREE.Color(1, 0.5, 1).multiplyScalar(4),
+      color: new THREE.Color(1, 0.5, 1).multiplyScalar(4 * LIGHTING.effects),
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -159,8 +159,8 @@ export class WeaponManager {
     engine.scene.add(this.worldMuzzleLight);
 
     for (let i = 0; i < 8; i++) {
-      const outer = new Beam(MAGENTA, 3);
-      const core = new Beam(0xffffff, 5);
+      const outer = new Beam(MAGENTA, 3 * LIGHTING.weaponGlow);
+      const core = new Beam(0xffffff, 5 * LIGHTING.weaponGlow);
       engine.scene.add(outer.mesh, core.mesh);
       this.shots.push({ outer, core, from: new THREE.Vector3(), to: new THREE.Vector3(), life: 0 });
     }
@@ -459,9 +459,9 @@ export class WeaponManager {
     this.muzzleFlash.visible = true;
     this.muzzleFlash.rotation.z = Math.random() * Math.PI;
     this.muzzleFlash.scale.setScalar(0.8 + Math.random() * 0.5);
-    this.muzzleLight.intensity = 6;
+    this.muzzleLight.intensity = 6 * LIGHTING.effects;
     this.worldMuzzleLight.position.copy(muzzleWorld);
-    this.worldMuzzleLight.intensity = 25;
+    this.worldMuzzleLight.intensity = 25 * LIGHTING.effects;
     this.player.addRecoil(PISTOL.recoilPitch);
     this.player.addShake(0.05);
     this.audio.playShot();
@@ -471,7 +471,7 @@ export class WeaponManager {
     this.kick *= Math.exp(-14 * dt);
     this.pistolModel.position.set(0, this.kick * 0.012, this.kick * 0.09);
     this.pistolModel.rotation.set(this.kick * 0.28, 0, -this.kick * 0.04);
-    this.pistolCoreMat.emissiveIntensity = 2 + this.kick * 6 + Math.sin(this.time * 4) * 0.3;
+    this.pistolCoreMat.emissiveIntensity = (2 + this.kick * 6 + Math.sin(this.time * 4) * 0.3) * LIGHTING.weaponGlow;
 
     if (this.flashTimer > 0) {
       this.flashTimer -= dt;
@@ -504,7 +504,7 @@ export class WeaponManager {
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x101218, metalness: 0.85, roughness: 0.3 });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x06070a, metalness: 0.3, roughness: 0.6 });
     const armMat = new THREE.MeshStandardMaterial({ color: 0x161922, metalness: 0.8, roughness: 0.35 });
-    const accentMat = new THREE.MeshBasicMaterial({ color: MAGENTA.clone().multiplyScalar(3.2), toneMapped: false });
+    const accentMat = new THREE.MeshBasicMaterial({ color: MAGENTA.clone().multiplyScalar(3.2 * LIGHTING.weaponGlow), toneMapped: false });
     const coreMat = new THREE.MeshStandardMaterial({
       color: 0x041014,
       emissive: CYAN,
@@ -576,10 +576,10 @@ export class WeaponManager {
     key.position.set(0.5, 1, 0.6);
     this.root.add(key);
     this.root.add(key.target);
-    const cyan = new THREE.PointLight(0x00e5ff, 1.3, 2.5, 2);
+    const cyan = new THREE.PointLight(0x00e5ff, 1.3 * LIGHTING.weaponGlow, 2.5, 2);
     cyan.position.set(0.5, 0.1, -0.3);
     this.root.add(cyan);
-    const magenta = new THREE.PointLight(0xff2bd6, 1.3, 2.5, 2);
+    const magenta = new THREE.PointLight(0xff2bd6, 1.3 * LIGHTING.weaponGlow, 2.5, 2);
     magenta.position.set(-0.5, 0.1, -0.3);
     this.root.add(magenta);
   }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LIGHTING } from '../config';
 
 interface TrailSample {
   tip: THREE.Vector3;
@@ -37,7 +38,7 @@ export class BladeTrail {
     this.geometry.setDrawRange(0, 0);
 
     this.material = new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color(color).multiplyScalar(3.5) } },
+      uniforms: { uColor: { value: new THREE.Color(color).multiplyScalar(3.5 * LIGHTING.weaponGlow) } },
       vertexShader: /* glsl */ `
         attribute float alpha;
         varying float vAlpha;
@@ -65,7 +66,7 @@ export class BladeTrail {
   }
 
   setColor(color: THREE.ColorRepresentation): void {
-    (this.material.uniforms.uColor.value as THREE.Color).set(color).multiplyScalar(3.5);
+    (this.material.uniforms.uColor.value as THREE.Color).set(color).multiplyScalar(3.5 * LIGHTING.weaponGlow);
   }
 
   addSample(tip: THREE.Vector3, base: THREE.Vector3): void {

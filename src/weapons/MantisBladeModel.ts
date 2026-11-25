@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { bakeGroup } from '../core/GeometryUtils';
+import { LIGHTING } from '../config';
 
 /**
  * Pose complète d'un bras : transformation du bras dans l'espace caméra +
@@ -183,14 +184,14 @@ export class MantisArm {
     this.side = side;
     const m = sharedMaterials();
     this.glowColor = color.clone();
-    this.glowMaterial = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(4), toneMapped: false });
-    const glowSoft = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(1.8), toneMapped: false });
+    this.glowMaterial = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(4 * LIGHTING.weaponGlow), toneMapped: false });
+    const glowSoft = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(1.8 * LIGHTING.weaponGlow), toneMapped: false });
     this.bladeMaterial = new THREE.MeshStandardMaterial({
       color: 0x0a0f15,
       metalness: 0.95,
       roughness: 0.2,
       emissive: color,
-      emissiveIntensity: 0.25,
+      emissiveIntensity: 0.25 * LIGHTING.weaponGlow,
     });
 
     this.inner.scale.x = side;
@@ -219,8 +220,9 @@ export class MantisArm {
 
   /** Pulsation lumineuse (0..1). */
   setPulse(k: number): void {
-    this.bladeMaterial.emissiveIntensity = 0.18 + k * 0.22;
-    this.glowMaterial.color.copy(this.glowColor).multiplyScalar(3.2 + k * 1.6);
+    const g = LIGHTING.weaponGlow;
+    this.bladeMaterial.emissiveIntensity = (0.18 + k * 0.22) * g;
+    this.glowMaterial.color.copy(this.glowColor).multiplyScalar((3.2 + k * 1.6) * g);
   }
 
   private updatePiston(): void {

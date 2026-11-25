@@ -5,7 +5,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { CAMERA, GRAPHICS, WORLD } from '../config';
+import { CAMERA, GRAPHICS, LIGHTING, WORLD } from '../config';
 import { QUALITY } from './Device';
 
 /** Shader final : aberration chromatique, vignette, teinte Sandevistan, dégâts, mort, grain. */
@@ -122,7 +122,7 @@ export class Engine {
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = GRAPHICS.exposure;
+    this.renderer.toneMappingExposure = LIGHTING.exposure;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
 
@@ -161,9 +161,9 @@ export class Engine {
 
     this.bloomPass = new UnrealBloomPass(
       size,
-      GRAPHICS.bloomStrength,
-      GRAPHICS.bloomRadius,
-      GRAPHICS.bloomThreshold,
+      LIGHTING.bloomStrength,
+      LIGHTING.bloomRadius,
+      LIGHTING.bloomThreshold,
     );
     this.composer.addPass(this.bloomPass);
 
@@ -196,7 +196,7 @@ export class Engine {
     u.uSpeed.value = fx.speed;
     // Traînées fantômes façon Sandevistan
     this.afterimagePass.damp = fx.sandevistan * 0.7;
-    this.bloomPass.strength = GRAPHICS.bloomStrength + fx.sandevistan * 0.12;
+    this.bloomPass.strength = LIGHTING.bloomStrength + fx.sandevistan * 0.08;
   }
 
   resize(): void {
@@ -270,9 +270,9 @@ export class Engine {
     pmrem.dispose();
 
     this.scene.environment = envMap;
-    this.scene.environmentIntensity = 0.35;
+    this.scene.environmentIntensity = 0.35 * LIGHTING.environment;
     this.weaponScene.environment = envMap;
-    this.weaponScene.environmentIntensity = 0.55;
+    this.weaponScene.environmentIntensity = 0.55 * LIGHTING.environment;
   }
 
   private setupLights(): void {
