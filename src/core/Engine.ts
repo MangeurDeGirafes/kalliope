@@ -259,11 +259,15 @@ export class Engine {
       mesh.scale.copy(scale);
       envScene.add(mesh);
     };
-    panel(0x00e5ff, 3, new THREE.Vector3(-6, 1, 0), new THREE.Vector3(0.2, 3, 8));
-    panel(0xff2bd6, 3, new THREE.Vector3(6, 1.5, -1), new THREE.Vector3(0.2, 2, 7));
-    panel(0x7a3cff, 1.6, new THREE.Vector3(0, 7, 0), new THREE.Vector3(10, 0.2, 2));
-    panel(0xffa040, 1.2, new THREE.Vector3(0, 0.5, -7), new THREE.Vector3(6, 1, 0.2));
-    panel(0x101830, 1, new THREE.Vector3(0, -4, 0), new THREE.Vector3(20, 0.2, 20));
+    // Reflets variés : enseignes de toutes les couleurs, ciel violet, rue orangée
+    panel(0x00e5ff, 2.4, new THREE.Vector3(-6, 1, 2), new THREE.Vector3(0.2, 3, 4));
+    panel(0xff9a3c, 3, new THREE.Vector3(-6, 0.5, -3), new THREE.Vector3(0.2, 2, 3));
+    panel(0xff2bd6, 2.2, new THREE.Vector3(6, 1.5, 2), new THREE.Vector3(0.2, 2, 3));
+    panel(0x9dff5c, 1.8, new THREE.Vector3(6, 0.8, -3), new THREE.Vector3(0.2, 1.5, 3));
+    panel(0x7a3cff, 1.4, new THREE.Vector3(0, 7, 0), new THREE.Vector3(10, 0.2, 2));
+    panel(0xfff1d6, 1.6, new THREE.Vector3(0, 0.5, -7), new THREE.Vector3(6, 1, 0.2));
+    panel(0xffd23b, 1.6, new THREE.Vector3(0, 1, 7), new THREE.Vector3(4, 1, 0.2));
+    panel(0x3a1a10, 1, new THREE.Vector3(0, -4, 0), new THREE.Vector3(20, 0.2, 20));
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const envMap = pmrem.fromScene(envScene, 0.04).texture;
@@ -276,20 +280,27 @@ export class Engine {
   }
 
   private setupLights(): void {
-    this.scene.add(new THREE.HemisphereLight(0x3a2a6a, 0x05030a, 0.9));
-    this.scene.add(new THREE.AmbientLight(0x1a1030, 0.6));
+    // Ciel violet au-dessus, rebond orangé des rues en dessous
+    this.scene.add(new THREE.HemisphereLight(0x4a3a7a, 0x4a2a14, 1.1));
+    this.scene.add(new THREE.AmbientLight(0x2a1c30, 0.55));
 
-    const moon = new THREE.DirectionalLight(0x7f9cff, 0.55);
+    const moon = new THREE.DirectionalLight(0x9fb4ff, 0.5);
     moon.position.set(-60, 120, 40);
     this.scene.add(moon);
 
-    const cyanFill = new THREE.DirectionalLight(0x00d5ff, 0.35);
+    // Lumière rasante des lampadaires au sodium, d'un côté…
+    const sodium = new THREE.DirectionalLight(0xff8a3c, 0.5);
+    sodium.position.set(-70, 12, -40);
+    this.scene.add(sodium);
+
+    // …et néons froids / roses de l'autre
+    const cyanFill = new THREE.DirectionalLight(0x2bd9c5, 0.3);
     cyanFill.position.set(80, 30, -100);
     this.scene.add(cyanFill);
 
-    const magentaFill = new THREE.DirectionalLight(0xff2bd6, 0.3);
-    magentaFill.position.set(-80, 20, 60);
-    this.scene.add(magentaFill);
+    const pinkFill = new THREE.DirectionalLight(0xff4fa3, 0.22);
+    pinkFill.position.set(60, 15, 80);
+    this.scene.add(pinkFill);
   }
 
   private createSky(): void {
@@ -299,9 +310,10 @@ export class Engine {
       depthWrite: false,
       fog: false,
       uniforms: {
-        uHorizon: { value: new THREE.Color(0x3a1048) },
+        uHorizon: { value: new THREE.Color(0x3a1838) },
         uGlow: { value: new THREE.Color(0xff3a8a) },
-        uZenith: { value: new THREE.Color(0x02020a) },
+        uWarm: { value: new THREE.Color(0xff7a30) },
+        uZenith: { value: new THREE.Color(0x03030c) },
       },
       vertexShader: /* glsl */ `
         varying vec3 vDir;
@@ -314,16 +326,20 @@ export class Engine {
       fragmentShader: /* glsl */ `
         uniform vec3 uHorizon;
         uniform vec3 uGlow;
+        uniform vec3 uWarm;
         uniform vec3 uZenith;
         varying vec3 vDir;
         float hash(vec3 p) { return fract(sin(dot(p, vec3(17.1, 31.7, 11.3))) * 43758.5453); }
         void main() {
           float h = vDir.y;
-          vec3 col = mix(uHorizon, uZenith, smoothstep(-0.05, 0.55, h));
-          col += uGlow * 0.22 * exp(-abs(h - 0.02) * 9.0);
-          // Nuages bas éclairés par la ville
+          vec3 col = mix(uHorizon, uZenith, smoothstep(-0.02, 0.6, h));
+          // Lueur orangée des lampadaires au ras de l'horizon, halo rose plus haut
+          col += uWarm * 0.3 * exp(-abs(h - 0.01) * 14.0);
+          col += uGlow * 0.12 * exp(-abs(h - 0.07) * 6.0);
+          // Nuages bas éclairés par la ville (orangés près de l'horizon, roses au-dessus)
           float bands = sin(vDir.x * 9.0 + sin(vDir.z * 6.0) * 2.0) * sin(vDir.z * 7.0 + vDir.x * 3.0);
-          col += vec3(0.25, 0.05, 0.25) * smoothstep(0.3, 1.0, bands) * smoothstep(0.45, 0.05, h) * 0.25;
+          vec3 cloud = mix(vec3(0.35, 0.14, 0.05), vec3(0.25, 0.06, 0.22), smoothstep(0.02, 0.25, h));
+          col += cloud * smoothstep(0.3, 1.0, bands) * smoothstep(0.45, 0.05, h) * 0.35;
           // Quelques étoiles perçant la pollution lumineuse
           float s = step(0.9985, hash(floor(vDir * 300.0)));
           col += vec3(s) * smoothstep(0.25, 0.6, h) * 0.6;

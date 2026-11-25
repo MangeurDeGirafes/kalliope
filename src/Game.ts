@@ -284,6 +284,7 @@ export class Game {
     this.weapons.update(playerDt, realDt, this.input, controlsEnabled);
     this.enemies.update(worldDt, this.player);
     this.particles.setViewport(this.engine.viewportHeight, this.engine.camera.fov);
+    this.level.setViewport(this.engine.viewportHeight, this.engine.camera.fov);
     this.particles.update(worldDt);
     this.level.update(worldDt, this.engine.camera.position);
 
@@ -335,6 +336,7 @@ export class Game {
     this.player.pitch = 0.05 + Math.sin(this.menuTime * 0.21) * 0.04;
     this.weapons.update(realDt, realDt, this.input, false);
     this.particles.setViewport(this.engine.viewportHeight, this.engine.camera.fov);
+    this.level.setViewport(this.engine.viewportHeight, this.engine.camera.fov);
     this.particles.update(realDt);
     this.level.update(realDt, this.engine.camera.position);
     this.engine.setEffects({ sandevistan: 0, damage: 0, death: 0, speed: 0 });

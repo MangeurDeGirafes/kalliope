@@ -186,7 +186,7 @@ export const WORLD = {
   rainSpeed: 27,
   rainWind: 3.5,
   rainLength: 0.7,
-  fogColor: 0x120a22,
+  fogColor: 0x1a0f20,
   fogDensity: 0.0068,
 } as const;
 

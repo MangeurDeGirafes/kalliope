@@ -3,17 +3,17 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Physics } from '../core/Physics';
 import type { EnemySpawn } from '../enemies/EnemyManager';
 import { Rain } from './Rain';
+import { Steam } from './Steam';
+import { createHoloTexture, createPanelTexture, createRng, createStreetTexture, scaleBoxUVs } from './Textures';
 import {
-  createAdTexture,
-  createHoloTexture,
-  createPanelTexture,
-  createRng,
-  createRoofTexture,
-  createSignTexture,
-  createStreetTexture,
-  createWindowTexture,
-  scaleBoxUVs,
-} from './Textures';
+  FACADE_CELLS,
+  SIGN_SCHEMES,
+  createFacade,
+  createPixelBillboard,
+  createPixelRoof,
+  createPixelSign,
+} from './PixelTextures';
+import type { BillboardKind, FacadeStyle, RoofStyle } from './PixelTextures';
 import { LIGHTING, WORLD } from '../config';
 import { QUALITY } from '../core/Device';
 
@@ -35,19 +35,46 @@ export interface LevelData {
   killPlaneY: number;
 }
 
+/** Palette néon : bien plus large que le duo rose / bleu. */
 const NEON = {
   cyan: 0x00e5ff,
   magenta: 0xff2bd6,
-  purple: 0x8a4dff,
+  purple: 0xa36bff,
   orange: 0xff8a2b,
-  red: 0xff2040,
+  red: 0xff3b3b,
   green: 0x2bffb0,
   yellow: 0xffd23b,
+  lime: 0x9dff5c,
+  amber: 0xffb030,
+  sodium: 0xff9a3c,
+  pink: 0xff4fa3,
+  teal: 0x2bd9c5,
+  warm: 0xfff1d6,
 } as const;
 
 const BASE_Y = -70;
-const WINDOW_TILE_U = 14.4;
-const WINDOW_TILE_V = 28.8;
+/** Une texture de façade couvre 20 m × 24 m (modules de 2,5 m × 3 m). */
+const FACADE_TILE_U = 20;
+const FACADE_TILE_V = 24;
+/** Une texture de toit couvre ~7,7 m (un pixel ≈ 6 cm). */
+const ROOF_TILE = 7.7;
+
+/** Variantes de façade (style + graine) partagées par le parcours et la ville. */
+const FACADES: readonly [FacadeStyle, number][] = [
+  ['brick', 11],
+  ['tile', 23],
+  ['concrete', 37],
+  ['metal', 41],
+  ['pastel', 53],
+  ['pastel', 67],
+  ['brick', 79],
+  ['glass', 83],
+];
+
+const CLOTHES = [0xf2f2f2, 0xd83a3a, 0x3a6ad8, 0xf2c83a, 0x4ab84a, 0xf28a3a, 0xf27ab8, 0x8a5ad8, 0x2ac8c8];
+const LEAVES = [0x3f8f3f, 0x5faf4f, 0x2f6f4f, 0x7fbf3f, 0x4f9f6f];
+const FLOWERS = [0xff5a7a, 0xffd23b, 0xff8a2b, 0xf2f2f2, 0xb86af2];
+const BULBS = [0xffc86a, 0xffb040, 0xffe0a0, 0xff6a5a, 0x9dff5c, 0x7fd8ff, 0xff7ad9];
 
 interface Flicker {
   material: THREE.Material & { opacity: number };
@@ -55,21 +82,34 @@ interface Flicker {
   phase: number;
 }
 
+type Rng = () => number;
+
+function pick<T>(rng: Rng, items: readonly T[]): T {
+  return items[Math.floor(rng() * items.length) % items.length];
+}
+
 /**
  * Construit le parcours sur les toits (immeubles, murs de wall-run balisés,
- * tremplins, obstacles à glisser dessous), la ville en arrière-plan, la
- * circulation aérienne et la pluie.
+ * tremplins, obstacles à glisser dessous), une ville habitée en pixel art
+ * (façades vivantes, toits encombrés, enseignes, affiches), la circulation
+ * aérienne, la vapeur et la pluie.
  */
 export class LevelBuilder {
   private readonly scene: THREE.Scene;
   private readonly physics: Physics;
   private readonly rng = createRng(1337);
   private readonly batches = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  private readonly windowMaterials: THREE.MeshStandardMaterial[] = [];
-  private readonly roofMaterial: THREE.MeshStandardMaterial;
+  private readonly facadeMaterials: THREE.MeshStandardMaterial[];
+  private readonly roofMaterials = new Map<RoofStyle, THREE.MeshStandardMaterial>();
   private readonly panelMaterial: THREE.MeshStandardMaterial;
   private readonly darkMaterial: THREE.MeshStandardMaterial;
+  /** Accessoires colorés (couleurs par sommet) : un seul draw call pour tous. */
+  private readonly propMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0.2 });
+  /** Éléments lumineux colorés (ampoules, écrans, voyants) : un seul draw call. */
+  private readonly glowMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   private readonly neonMaterials = new Map<number, THREE.MeshBasicMaterial>();
+  private readonly billboardTextures = new Map<string, THREE.CanvasTexture>();
+  private readonly facadeTime = { value: 0 };
   private readonly jumpPads: JumpPad[] = [];
   private readonly padVisuals: { ring: THREE.Mesh; column: THREE.ShaderMaterial; pad: JumpPad }[] = [];
   private readonly flickers: Flicker[] = [];
@@ -81,45 +121,40 @@ export class LevelBuilder {
     cars: { x: number; y: number; z: number; speed: number; dir: number }[];
   } | null = null;
   private rain: Rain | null = null;
+  private readonly steam: Steam;
   /** Zones à garder libres (ennemis, tremplins, obstacles) lors du placement des accessoires. */
   private readonly exclusions: { x: number; z: number; r: number }[] = [];
   private readonly roofs: { cx: number; cz: number; w: number; d: number; top: number; seed: number }[] = [];
   private time = 0;
   private readonly dummy = new THREE.Object3D();
+  private readonly tmpColor = new THREE.Color();
 
   constructor(scene: THREE.Scene, physics: Physics) {
     this.scene = scene;
     this.physics = physics;
+    this.steam = new Steam(scene);
 
-    for (let i = 0; i < 3; i++) {
-      const tex = createWindowTexture(100 + i * 17);
-      this.windowMaterials.push(
-        new THREE.MeshStandardMaterial({
-          color: 0x14151c,
-          roughness: 0.55,
-          metalness: 0.5,
-          emissive: 0xffffff,
-          emissiveMap: tex,
-          emissiveIntensity: 0.9 * LIGHTING.windows,
-        }),
+    this.facadeMaterials = FACADES.map(([style, seed]) => this.createFacadeMaterial(style, seed));
+    const roofSeeds: Record<RoofStyle, number> = { tar: 7, concrete: 19, green: 29, rust: 31 };
+    for (const style of Object.keys(roofSeeds) as RoofStyle[]) {
+      const map = createPixelRoof(style, roofSeeds[style]);
+      // Le toit est légèrement auto-éclairé (lumière diffuse de la ville) pour rester lisible.
+      this.roofMaterials.set(
+        style,
+        new THREE.MeshStandardMaterial({ map, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 0.18, roughness: 0.42, metalness: 0.18 }),
       );
     }
-    const roofTex = createRoofTexture(7);
-    roofTex.repeat.set(1, 2);
-    this.roofMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8a8a9a,
-      map: roofTex,
-      roughness: 0.32,
-      metalness: 0.35,
-    });
     const panelTex = createPanelTexture(3);
-    this.panelMaterial = new THREE.MeshStandardMaterial({
-      color: 0x9a9aae,
-      map: panelTex,
-      roughness: 0.45,
-      metalness: 0.7,
-    });
+    panelTex.magFilter = THREE.NearestFilter;
+    this.panelMaterial = new THREE.MeshStandardMaterial({ color: 0x9a9aae, map: panelTex, roughness: 0.45, metalness: 0.7 });
     this.darkMaterial = new THREE.MeshStandardMaterial({ color: 0x0c0c12, roughness: 0.8, metalness: 0.2 });
+    // Accessoires : leur couleur propre reste visible la nuit (léger auto-éclairage).
+    this.propMaterial.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vColor.rgb * 0.22;',
+      );
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -137,32 +172,32 @@ export class LevelBuilder {
 
     this.exclusions.push({ x: 0, z: 6, r: 3 });
 
-    // --- B1 : toit de départ -------------------------------------------------
-    this.addBuilding(0, -9, 16, 42, 0, NEON.cyan, 0);
+    // --- B1 : toit de départ (briques, toit goudronné) -------------------------
+    this.addBuilding(0, -9, 16, 42, 0, NEON.amber, 0, 'tar');
     this.queueRoofProps(0, -9, 16, 42, 0, 11);
     this.addHoloSign(['ZQSD / WASD : COURIR', 'SOURIS : VISER'], new THREE.Vector3(0, 2.7, -3), NEON.cyan, 5.5);
-    this.addHoloSign(['ESPACE : SAUTER', 'ESPACE EN L\'AIR : DOUBLE SAUT'], new THREE.Vector3(-3.5, 2.8, -22), NEON.cyan, 5.5);
+    this.addHoloSign(['ESPACE : SAUTER', 'ESPACE EN L\'AIR : DOUBLE SAUT'], new THREE.Vector3(-3.5, 2.8, -22), NEON.amber, 5.5);
     this.addHoloSign(['CLIC GAUCHE : LAMES MANTIS', '1 / 2 : CHANGER D\'ARME'], new THREE.Vector3(4.5, 3.2, -14), NEON.magenta, 5);
     guard(4.5, 0, -27, 0);
-    this.addNeonLight(new THREE.Vector3(0, 6, -10), NEON.cyan, 22, 30);
+    this.addNeonLight(new THREE.Vector3(0, 6, -10), NEON.sodium, 22, 30);
 
-    // --- B2 : obstacle à glisser dessous ------------------------------------
-    this.addBuilding(0, -55, 18, 34, 0.5, NEON.magenta, 1);
+    // --- B2 : obstacle à glisser dessous (carrelage, balcons) ------------------
+    this.addBuilding(0, -55, 18, 34, 0.5, NEON.pink, 1, 'concrete');
     this.queueRoofProps(0, -55, 18, 34, 0.5, 23);
     this.addSlideBarrier(0, -50, 18, 0.5);
     this.addHoloSign(['C / CTRL : GLISSADE', 'GARDE TON ÉLAN !'], new THREE.Vector3(-3, 3.2, -43), NEON.orange, 5);
-    this.addHoloSign(['WALL-RUN ►', 'SAUTE VERS LE MUR', 'EN MAINTENANT AVANCER'], new THREE.Vector3(5, 3.6, -68), NEON.green, 4.6);
+    this.addHoloSign(['WALL-RUN ►', 'SAUTE VERS LE MUR', 'EN MAINTENANT AVANCER'], new THREE.Vector3(5, 3.6, -68), NEON.lime, 4.6);
     guard(-4, 0.5, -63, 0);
     guard(5.5, 0.5, -69, -0.3);
-    this.addNeonLight(new THREE.Vector3(0, 6, -60), NEON.magenta, 22, 30);
+    this.addNeonLight(new THREE.Vector3(0, 6, -60), NEON.pink, 22, 30);
 
-    // --- Gouffre 2 : double mur de wall-run ---------------------------------
-    this.addWallRunWall(3.9, -71, -90, 9, -1, NEON.green, 'NEON//VERTIGO', 'RUN THE WALLS', 0);
-    this.addWallRunWall(-3.9, -86, -104, 9, 1, NEON.cyan, 'ネオン 電脳', 'KALLIOPE SYSTEMS', 1);
-    this.addNeonLight(new THREE.Vector3(0, 5, -87), NEON.green, 16, 28);
+    // --- Gouffre 2 : double mur de wall-run (balisage vert citron) -------------
+    this.addWallRunWall(3.9, -71, -90, 9, -1, NEON.lime, 'vertigo');
+    this.addWallRunWall(-3.9, -86, -104, 9, 1, NEON.lime, 'koi');
+    this.addNeonLight(new THREE.Vector3(0, 5, -87), NEON.lime, 16, 28);
 
-    // --- B3 : premier vrai combat + tremplin --------------------------------
-    this.addBuilding(0, -120, 18, 32, 0, NEON.purple, 2);
+    // --- B3 : premier vrai combat + tremplin (béton, toit végétalisé) ---------
+    this.addBuilding(0, -120, 18, 32, 0, NEON.teal, 2, 'green');
     this.queueRoofProps(0, -120, 18, 32, 0, 37);
     this.addHoloSign(['CLIC DROIT : SANDEVISTAN', 'LE TEMPS RALENTIT'], new THREE.Vector3(-5, 3, -108), NEON.green, 5);
     this.addHoloSign(['▲ TREMPLIN ▲'], new THREE.Vector3(0, 4.2, -128), NEON.green, 3.6);
@@ -170,40 +205,40 @@ export class LevelBuilder {
     guard(5, 0, -125, -0.2);
     drone(0, 6.5, -114);
     this.addJumpPad(new THREE.Vector3(0, 0, -132), 22.5, new THREE.Vector3(0, 0, -6));
-    this.addNeonLight(new THREE.Vector3(0, 6, -124), NEON.purple, 22, 30);
+    this.addNeonLight(new THREE.Vector3(0, 6, -124), NEON.teal, 22, 30);
 
-    // --- B4 : toit haut --------------------------------------------------------
-    this.addBuilding(0, -164, 16, 36, 8, NEON.orange, 0);
+    // --- B4 : toit haut (tôle rouillée) ----------------------------------------
+    this.addBuilding(0, -164, 16, 36, 8, NEON.red, 3, 'rust');
     this.queueRoofProps(0, -164, 16, 36, 8, 41);
     this.addSlideBarrier(0, -160, 16, 8);
     this.addHoloSign(['SHIFT : DASH', 'MUR À GAUCHE ◄'], new THREE.Vector3(-3, 11.4, -178), NEON.yellow, 5);
     guard(5, 8, -170, 0);
     guard(-4.5, 8, -176, 0.3);
     drone(0, 14, -166);
-    this.addNeonLight(new THREE.Vector3(0, 14, -165), NEON.orange, 22, 30);
+    this.addNeonLight(new THREE.Vector3(0, 14, -165), NEON.sodium, 22, 30);
 
-    // --- Gouffre 4 : wall-run descendant ---------------------------------------
-    this.addWallRunWall(-3.9, -181, -205, 14, 1, NEON.magenta, '夜市 NIGHT MARKET', 'DESCENDS EN COURANT', 2);
+    // --- Gouffre 4 : wall-run descendant (marché de nuit) ----------------------
+    this.addWallRunWall(-3.9, -181, -205, 14, 1, NEON.lime, 'ramen');
     drone(6, 10, -193);
     drone(-1, 13, -201);
-    this.addNeonLight(new THREE.Vector3(2, 10, -195), NEON.magenta, 19, 30);
+    this.addNeonLight(new THREE.Vector3(2, 10, -195), NEON.pink, 19, 30);
 
-    // --- B5 ---------------------------------------------------------------------
-    this.addBuilding(0, -221, 18, 30, 4, NEON.cyan, 1);
+    // --- B5 (immeuble pastel) ------------------------------------------------------
+    this.addBuilding(0, -221, 18, 30, 4, NEON.purple, 4, 'concrete');
     this.queueRoofProps(0, -221, 18, 30, 4, 53);
     guard(3, 4, -216, 0);
     guard(-5, 4, -229, 0.4);
-    this.addNeonLight(new THREE.Vector3(0, 10, -222), NEON.cyan, 22, 30);
+    this.addNeonLight(new THREE.Vector3(0, 10, -222), NEON.purple, 22, 30);
 
     // --- Plateformes ascendantes -------------------------------------------------
-    this.addBuilding(0, -244, 7, 7, 5, NEON.magenta, 2);
-    this.addBuilding(4, -255, 7, 7, 6, NEON.purple, 0);
-    this.addBuilding(-2, -266, 7, 7, 7, NEON.cyan, 1);
+    this.addBuilding(0, -244, 7, 7, 5, NEON.lime, 5, 'tar');
+    this.addBuilding(4, -255, 7, 7, 6, NEON.amber, 6, 'tar');
+    this.addBuilding(-2, -266, 7, 7, 7, NEON.cyan, 1, 'tar');
     this.addJumpPad(new THREE.Vector3(-2, 7, -266.5), 14.5, new THREE.Vector3(0.6, 0, -6));
     drone(7, 12, -255);
 
-    // --- B6 : tour finale + extraction ----------------------------------------------
-    this.addBuilding(0, -291, 20, 30, 9, NEON.yellow, 2);
+    // --- B6 : tour de verre finale + extraction -------------------------------------
+    this.addBuilding(0, -291, 20, 30, 9, NEON.warm, 7, 'tar');
     this.queueRoofProps(0, -291, 20, 30, 9, 67);
     guard(-6, 9, -284, 0);
     guard(6, 9, -290, 0);
@@ -241,9 +276,15 @@ export class LevelBuilder {
     }
   }
 
+  /** Taille de rendu des particules de vapeur (à appeler à chaque frame). */
+  setViewport(viewportHeightPx: number, fovDeg: number): void {
+    this.steam.setViewport(viewportHeightPx, fovDeg);
+  }
+
   update(dt: number, cameraPosition: THREE.Vector3): void {
     this.time += dt;
     const t = this.time;
+    this.facadeTime.value = t;
 
     for (const v of this.padVisuals) {
       v.pad.cooldown = Math.max(0, v.pad.cooldown - dt);
@@ -268,12 +309,50 @@ export class LevelBuilder {
     }
 
     this.updateTraffic(dt);
+    this.steam.update(dt, cameraPosition);
     this.rain?.update(dt, cameraPosition);
   }
 
   // ---------------------------------------------------------------------------
-  // Éléments du parcours
+  // Matériaux
   // ---------------------------------------------------------------------------
+
+  /**
+   * Façade pixel art. Le shader est enrichi pour animer la vie des fenêtres :
+   * quelques télés scintillent et des lumières s'allument / s'éteignent.
+   */
+  private createFacadeMaterial(style: FacadeStyle, seed: number): THREE.MeshStandardMaterial {
+    const { map, emissive } = createFacade(style, seed);
+    const glass = style === 'glass';
+    const mat = new THREE.MeshStandardMaterial({
+      map,
+      emissiveMap: emissive,
+      emissive: 0xffffff,
+      emissiveIntensity: 1.15 * LIGHTING.windows,
+      roughness: glass ? 0.25 : 0.82,
+      metalness: glass ? 0.55 : 0.08,
+    });
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uFacadeTime = this.facadeTime;
+      shader.fragmentShader =
+        'uniform float uFacadeTime;\n' +
+        shader.fragmentShader.replace(
+          '#include <emissivemap_fragment>',
+          /* glsl */ `#include <emissivemap_fragment>
+          {
+            vec2 cell = floor(vEmissiveMapUv * ${FACADE_CELLS}.0);
+            float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+            if (h > 0.985) {
+              float tv = 0.6 + 0.4 * sin(uFacadeTime * (7.0 + h * 13.0)) * sin(uFacadeTime * 2.3 + h * 50.0);
+              totalEmissiveRadiance *= tv * vec3(0.75, 0.9, 1.35);
+            } else if (h > 0.965) {
+              totalEmissiveRadiance *= 0.1 + 0.9 * step(0.0, sin(uFacadeTime * 0.15 + h * 200.0));
+            }
+          }`,
+        );
+    };
+    return mat;
+  }
 
   private neon(color: number, intensity = 3): THREE.MeshBasicMaterial {
     const key = color * 10 + intensity;
@@ -285,15 +364,41 @@ export class LevelBuilder {
     return m;
   }
 
-  private batch(material: THREE.Material, geometry: THREE.BufferGeometry, matrix: THREE.Matrix4): void {
+  private billboard(kind: BillboardKind, width = 64): THREE.CanvasTexture {
+    const key = `${kind}-${width}`;
+    let tex = this.billboardTextures.get(key);
+    if (!tex) {
+      tex = createPixelBillboard(kind, width, 7 + this.billboardTextures.size);
+      this.billboardTextures.set(key, tex);
+    }
+    return tex;
+  }
+
+  private signMaterial(map: THREE.Texture, brightness: number): THREE.MeshBasicMaterial {
+    return new THREE.MeshBasicMaterial({ map, color: new THREE.Color(1, 1, 1).multiplyScalar(brightness * LIGHTING.signs) });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fusion de géométrie
+  // ---------------------------------------------------------------------------
+
+  private batch(material: THREE.Material, geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, color?: THREE.Color): void {
     const g = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     g.applyMatrix4(matrix);
     // Uniformise les attributs pour la fusion
     for (const name of Object.keys(g.attributes)) {
       if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
     }
-    if (!g.getAttribute('uv')) {
-      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
+    const count = g.getAttribute('position').count;
+    if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+    if (color) {
+      const colors = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     }
     let list = this.batches.get(material);
     if (!list) {
@@ -303,13 +408,32 @@ export class LevelBuilder {
     list.push(g);
   }
 
-  private batchBox(material: THREE.Material, w: number, h: number, d: number, x: number, y: number, z: number, rotY = 0, rotX = 0): void {
-    const m = new THREE.Matrix4().compose(
+  private matrix(x: number, y: number, z: number, rotY = 0, rotX = 0, rotZ = 0): THREE.Matrix4 {
+    return new THREE.Matrix4().compose(
       new THREE.Vector3(x, y, z),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(rotX, rotY, 0, 'YXZ')),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rotX, rotY, rotZ, 'YXZ')),
       new THREE.Vector3(1, 1, 1),
     );
-    this.batch(material, new THREE.BoxGeometry(w, h, d), m);
+  }
+
+  private batchBox(material: THREE.Material, w: number, h: number, d: number, x: number, y: number, z: number, rotY = 0, rotX = 0): void {
+    this.batch(material, new THREE.BoxGeometry(w, h, d), this.matrix(x, y, z, rotY, rotX));
+  }
+
+  /** Boîte colorée (matériau d'accessoires partagé). */
+  private prop(w: number, h: number, d: number, x: number, y: number, z: number, hex: number, rotY = 0, rotX = 0): void {
+    this.batch(this.propMaterial, new THREE.BoxGeometry(w, h, d), this.matrix(x, y, z, rotY, rotX), this.tmpColor.set(hex));
+  }
+
+  /** Géométrie quelconque colorée. */
+  private propGeo(geo: THREE.BufferGeometry, m: THREE.Matrix4, hex: number): void {
+    this.batch(this.propMaterial, geo, m, this.tmpColor.set(hex));
+  }
+
+  /** Boîte lumineuse colorée (ampoules, écrans, voyants). */
+  private glow(w: number, h: number, d: number, x: number, y: number, z: number, hex: number, intensity = 2.5): void {
+    const c = this.tmpColor.set(hex).multiplyScalar(intensity * LIGHTING.neon);
+    this.batch(this.glowMaterial, new THREE.BoxGeometry(w, h, d), this.matrix(x, y, z), c);
   }
 
   private flushBatches(): void {
@@ -323,17 +447,26 @@ export class LevelBuilder {
     this.batches.clear();
   }
 
-  private addBuilding(cx: number, cz: number, w: number, d: number, top: number, trimColor: number, windowVariant: number): void {
+  // ---------------------------------------------------------------------------
+  // Immeubles du parcours
+  // ---------------------------------------------------------------------------
+
+  private addBuilding(cx: number, cz: number, w: number, d: number, top: number, trimColor: number, facade: number, roof: RoofStyle): void {
     const h = top - BASE_Y;
     const geo = new THREE.BoxGeometry(w, h, d);
-    scaleBoxUVs(geo, w, h, d, WINDOW_TILE_U, WINDOW_TILE_V, Math.floor(this.rng() * 8) / 16, Math.floor(this.rng() * 16) / 32);
-    // Le toit utilise une échelle d'UV propre (dalles de ~7 m)
+    const cells = FACADE_CELLS;
+    scaleBoxUVs(geo, w, h, d, FACADE_TILE_U, FACADE_TILE_V, Math.floor(this.rng() * cells) / cells, Math.floor(this.rng() * cells) / cells);
+    // Toit : UV à l'échelle du monde (pixels carrés)
     const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
-    for (let i = 8; i < 12; i++) {
-      uv.setXY(i, (uv.getX(i) * WINDOW_TILE_U) / 7.2, (uv.getY(i) * WINDOW_TILE_U) / 7.2);
-    }
-    const win = this.windowMaterials[windowVariant % this.windowMaterials.length];
-    const mesh = new THREE.Mesh(geo, [win, win, this.roofMaterial, this.darkMaterial, win, win]);
+    const ru = w / ROOF_TILE;
+    const rv = d / ROOF_TILE;
+    uv.setXY(8, 0, rv);
+    uv.setXY(9, ru, rv);
+    uv.setXY(10, 0, 0);
+    uv.setXY(11, ru, 0);
+    const fac = this.facadeMaterials[facade % this.facadeMaterials.length];
+    const roofMat = this.roofMaterials.get(roof)!;
+    const mesh = new THREE.Mesh(geo, [fac, fac, roofMat, this.darkMaterial, fac, fac]);
     mesh.position.set(cx, BASE_Y + h / 2, cz);
     this.scene.add(mesh);
     this.physics.addBox(new THREE.Vector3(cx, BASE_Y + h / 2, cz), new THREE.Vector3(w / 2, h / 2, d / 2));
@@ -354,8 +487,7 @@ export class LevelBuilder {
       }
     }
     // Bandeau lumineux sous le toit
-    const band = this.neon(trimColor, 1.6);
-    this.batchBox(band, w + 0.1, 0.25, d + 0.1, cx, top - 1.4, cz);
+    this.batchBox(this.neon(trimColor, 1.4), w + 0.1, 0.25, d + 0.1, cx, top - 1.4, cz);
   }
 
   private queueRoofProps(cx: number, cz: number, w: number, d: number, top: number, seed: number): void {
@@ -369,55 +501,238 @@ export class LevelBuilder {
     return true;
   }
 
+  /** Toit habité : chaque emplacement le long des bords reçoit un accessoire. */
   private addRoofProps(cx: number, cz: number, w: number, d: number, top: number, seed: number): void {
     const rng = createRng(seed);
-    const count = Math.floor(d / 9);
-    for (let i = 0; i < count; i++) {
-      const side = rng() < 0.5 ? -1 : 1;
-      const z = cz + d / 2 - 4 - (i + rng() * 0.5) * ((d - 8) / count);
-      const x = cx + side * (w / 2 - 1.6 - rng() * 1.2);
-      const kind = rng();
-      if (!this.isFree(x, z, 1.6)) continue;
-      if (kind < 0.5) this.addACUnit(x, top, z, rng);
-      else if (kind < 0.75) this.addWaterTank(x, top, z);
-      else this.addAntenna(x, top, z, 4 + rng() * 5);
+    for (const side of [-1, 1] as const) {
+      let z = cz + d / 2 - 2.5 - rng() * 1.5;
+      while (z > cz - d / 2 + 2.5) {
+        const x = cx + side * (w / 2 - 1.5);
+        const facing: 1 | -1 = side > 0 ? -1 : 1; // face tournée vers le centre du toit
+        const roll = rng();
+        let used = 2.5;
+        if (this.isFree(x, z, 1.7)) {
+          if (roll < 0.17) used = this.propAC(x, top, z, rng);
+          else if (roll < 0.29) used = this.propVending(x, top, z, facing, rng);
+          else if (roll < 0.42) used = this.propGarden(x, top, z, rng);
+          else if (roll < 0.52) used = this.propLaundry(x + side * 0.4, top, z, rng);
+          else if (roll < 0.6) used = this.propTank(x, top, z, rng);
+          else if (roll < 0.68) used = this.propSolar(x, top, z, rng);
+          else if (roll < 0.76) used = this.propCrates(x, top, z, rng);
+          else if (roll < 0.83) used = this.propShack(x, top, z, facing, rng);
+          else if (roll < 0.9) used = this.propLounge(x, top, z, rng);
+          else if (roll < 0.95) used = this.propDish(x, top, z, rng);
+          else used = this.propAntenna(x, top, z, 4 + rng() * 5);
+        }
+        z -= used + 1 + rng() * 1.5;
+      }
     }
-    // Petits conduits bas au milieu (couverture, franchissables)
+    // Guirlande lumineuse le long d'un bord
+    const gs = rng() < 0.5 ? -1 : 1;
+    const gx = cx + gs * (w / 2 - 0.4);
+    const z0 = cz + d / 2 - 2;
+    const z1 = cz - d / 2 + 2;
+    if (this.isFree(gx, (z0 + z1) / 2, 0)) {
+      this.prop(0.08, 2.6, 0.08, gx, top + 1.3, z0, 0x2a2a30);
+      this.prop(0.08, 2.6, 0.08, gx, top + 1.3, z1, 0x2a2a30);
+      this.stringLights(gx, z0, gx, z1, top + 2.55, rng);
+    }
+    // Petit conduit bas au milieu (couverture franchissable) + bouche de vapeur
     if (d > 30) {
       const z = cz + (rng() - 0.5) * 6;
       const x = cx + (rng() < 0.5 ? -1 : 1) * 2.8;
-      if (!this.isFree(x, z, 1.5)) return;
-      this.batchBox(this.panelMaterial, 2.6, 0.9, 1.2, x, top + 0.45, z);
-      this.physics.addBox(new THREE.Vector3(x, top + 0.45, z), new THREE.Vector3(1.3, 0.45, 0.6));
+      if (this.isFree(x, z, 1.5)) {
+        this.prop(2.6, 0.9, 1.2, x, top + 0.45, z, 0x8a8e96);
+        this.prop(0.4, 0.5, 0.4, x + 0.8, top + 1.15, z, 0x5a5e66);
+        this.steam.addVent(new THREE.Vector3(x + 0.8, top + 1.45, z), 4);
+        this.physics.addBox(new THREE.Vector3(x, top + 0.45, z), new THREE.Vector3(1.3, 0.45, 0.6));
+      }
     }
   }
 
-  private addACUnit(x: number, top: number, z: number, rng: () => number): void {
-    const w = 2.2;
-    const h = 1.3;
-    const d = 1.6;
-    this.batchBox(this.panelMaterial, w, h, d, x, top + h / 2, z);
-    this.batchBox(this.darkMaterial, 1.0, 0.06, 1.0, x, top + h + 0.03, z);
-    this.batchBox(this.neon(rng() < 0.5 ? NEON.green : NEON.red, 4), 0.08, 0.08, 0.02, x + 0.8, top + h - 0.25, z + d / 2 + 0.01);
-    this.physics.addBox(new THREE.Vector3(x, top + h / 2, z), new THREE.Vector3(w / 2, h / 2, d / 2));
+  // --- Accessoires (renvoient la longueur occupée le long du toit) -----------------
+
+  private propAC(x: number, top: number, z: number, rng: Rng): number {
+    const body = pick(rng, [0xd8d2c0, 0xb8bcc4, 0x9aa0a8, 0xc8c0a8]);
+    const n = 1 + Math.floor(rng() * 3);
+    for (let i = 0; i < n; i++) {
+      const zi = z - i * 1.7;
+      this.prop(1.6, 1.1, 1.4, x, top + 0.55, zi, body);
+      this.propGeo(new THREE.CylinderGeometry(0.48, 0.48, 0.05, 14), this.matrix(x, top + 1.13, zi), 0x2a2a2e);
+      this.prop(1.0, 0.06, 0.06, x, top + 1.16, zi, 0x5a5a60);
+      this.glow(0.06, 0.06, 0.06, x + 0.62, top + 0.9, zi + 0.71, pick(rng, [0x2bff6a, 0xff3b3b, 0x3b8bff]), 3);
+    }
+    if (rng() < 0.6) this.steam.addVent(new THREE.Vector3(x, top + 1.25, z), 3);
+    this.physics.addBox(new THREE.Vector3(x, top + 0.55, z - (n - 1) * 0.85), new THREE.Vector3(0.8, 0.55, (n * 1.7 - 0.3) / 2));
+    return n * 1.7;
   }
 
-  private addWaterTank(x: number, top: number, z: number): void {
-    const tank = new THREE.CylinderGeometry(1.1, 1.1, 2.2, 16);
-    this.batch(this.panelMaterial, tank, new THREE.Matrix4().makeTranslation(x, top + 1.1 + 0.9, z));
+  private propVending(x: number, top: number, z: number, facing: 1 | -1, rng: Rng): number {
+    const n = 1 + Math.floor(rng() * 2);
+    for (let i = 0; i < n; i++) {
+      const zi = z - i * 1.1;
+      const body = pick(rng, [0xc8202a, 0x1f5fbf, 0xe8e8e8, 0x2a8a3a, 0xe0a020, 0x8a2ad8]);
+      const fx = x + facing * 0.41;
+      this.prop(0.8, 1.9, 1.0, x, top + 0.95, zi, body);
+      this.glow(0.02, 0.95, 0.8, fx, top + 1.28, zi, 0xfff1d6, 1.4);
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 4; c++) {
+          this.glow(0.03, 0.14, 0.13, fx + facing * 0.01, top + 0.98 + r * 0.28, zi - 0.3 + c * 0.2, pick(rng, [0xff3b3b, 0xffd23b, 0x2bff6a, 0x3b8bff, 0xff8a2b, 0xf2f2f2]), 2.2);
+        }
+      }
+      this.prop(0.03, 0.18, 0.6, fx, top + 0.42, zi, 0x15151a);
+      this.glow(0.02, 0.16, 0.9, fx, top + 1.83, zi, body, 2.4);
+    }
+    this.physics.addBox(new THREE.Vector3(x, top + 0.95, z - (n - 1) * 0.55), new THREE.Vector3(0.4, 0.95, (n * 1.1) / 2));
+    return n * 1.1;
+  }
+
+  private propGarden(x: number, top: number, z: number, rng: Rng): number {
+    const n = 2 + Math.floor(rng() * 2);
+    const box = pick(rng, [0xa0522d, 0x7a5230, 0x8a857a, 0x5a6a7a]);
+    for (let i = 0; i < n; i++) {
+      const zi = z - i * 1.05;
+      this.prop(0.9, 0.45, 0.9, x, top + 0.225, zi, box);
+      for (let k = 0; k < 6; k++) {
+        const s = 0.18 + rng() * 0.2;
+        this.prop(s, s, s, x + (rng() - 0.5) * 0.6, top + 0.5 + rng() * 0.35, zi + (rng() - 0.5) * 0.6, pick(rng, LEAVES), rng() * 3);
+      }
+      for (let k = 0; k < 3; k++) {
+        this.prop(0.1, 0.1, 0.1, x + (rng() - 0.5) * 0.6, top + 0.85 + rng() * 0.2, zi + (rng() - 0.5) * 0.6, pick(rng, FLOWERS));
+      }
+    }
+    // Petit arbre en pot
+    if (rng() < 0.6) {
+      const zt = z - n * 1.05;
+      this.prop(0.7, 0.6, 0.7, x, top + 0.3, zt, box);
+      this.prop(0.12, 1.3, 0.12, x, top + 1.25, zt, 0x5a3a1f);
+      for (let k = 0; k < 4; k++) {
+        const s = 0.6 + rng() * 0.4;
+        this.prop(s, s * 0.8, s, x + (rng() - 0.5) * 0.5, top + 1.8 + rng() * 0.5, zt + (rng() - 0.5) * 0.5, pick(rng, LEAVES), rng() * 3);
+      }
+      this.physics.addBox(new THREE.Vector3(x, top + 0.3, zt), new THREE.Vector3(0.35, 0.3, 0.35));
+    }
+    this.physics.addBox(new THREE.Vector3(x, top + 0.225, z - (n - 1) * 0.525), new THREE.Vector3(0.45, 0.225, (n * 1.05) / 2));
+    return n * 1.05 + 1;
+  }
+
+  private propLaundry(x: number, top: number, z: number, rng: Rng): number {
+    const len = 3 + rng() * 2;
+    const z0 = z;
+    const z1 = z - len;
+    this.prop(0.06, 1.95, 0.06, x, top + 0.975, z0, 0x3a3a40);
+    this.prop(0.06, 1.95, 0.06, x, top + 0.975, z1, 0x3a3a40);
+    this.prop(0.02, 0.02, len, x, top + 1.9, (z0 + z1) / 2, 0x1a1a1a);
+    for (let zz = z0 - 0.3; zz > z1 + 0.2; zz -= 0.35 + rng() * 0.25) {
+      const h = 0.35 + rng() * 0.4;
+      const wdt = 0.22 + rng() * 0.2;
+      this.prop(0.02, h, wdt, x, top + 1.9 - h / 2, zz, pick(rng, CLOTHES));
+    }
+    return len;
+  }
+
+  private propTank(x: number, top: number, z: number, rng: Rng): number {
+    const wood = rng() < 0.6;
+    const color = wood ? 0x6b4a2f : pick(rng, [0x2f5f9a, 0xd8d8d0, 0x3a7a4a]);
+    this.propGeo(new THREE.CylinderGeometry(1.1, 1.1, 2.2, 16), this.matrix(x, top + 2.0, z), color);
+    if (wood) {
+      for (const y of [1.3, 2.0, 2.7]) this.propGeo(new THREE.CylinderGeometry(1.13, 1.13, 0.08, 16), this.matrix(x, top + y, z), 0x2a2a2a);
+      this.propGeo(new THREE.ConeGeometry(1.2, 0.6, 16), this.matrix(x, top + 3.4, z), 0x4a3220);
+    } else {
+      this.propGeo(new THREE.CylinderGeometry(1.0, 1.1, 0.25, 16), this.matrix(x, top + 3.2, z), color);
+    }
     for (const [ox, oz] of [
       [-0.7, -0.7],
       [0.7, -0.7],
       [-0.7, 0.7],
       [0.7, 0.7],
     ]) {
-      this.batchBox(this.darkMaterial, 0.12, 0.9, 0.12, x + ox, top + 0.45, z + oz);
+      this.prop(0.12, 0.9, 0.12, x + ox, top + 0.45, z + oz, 0x2a2a30);
     }
-    this.batchBox(this.neon(NEON.cyan, 3), 2.24, 0.06, 0.06, x, top + 2.6, z + 0.9);
-    this.physics.addBox(new THREE.Vector3(x, top + 1.55, z), new THREE.Vector3(1.0, 1.55, 1.0));
+    this.physics.addBox(new THREE.Vector3(x, top + 1.7, z), new THREE.Vector3(1.0, 1.7, 1.0));
+    return 2.4;
   }
 
-  private addAntenna(x: number, top: number, z: number, height: number): void {
+  private propSolar(x: number, top: number, z: number, rng: Rng): number {
+    const n = 2 + Math.floor(rng() * 2);
+    for (let i = 0; i < n; i++) {
+      const zi = z - i * 1.2;
+      this.prop(1.7, 0.06, 1.05, x, top + 0.62, zi, 0x9aa0a8, 0, 0.35);
+      this.prop(1.62, 0.07, 0.98, x, top + 0.63, zi, 0x1b2a4a, 0, 0.35);
+      for (let k = -1; k <= 1; k++) this.prop(1.64, 0.075, 0.015, x, top + 0.63 + k * 0.1, zi + k * 0.3, 0x3a5a8a, 0, 0.35);
+      this.prop(0.06, 0.6, 0.06, x - 0.7, top + 0.3, zi, 0x5a5a60);
+      this.prop(0.06, 0.6, 0.06, x + 0.7, top + 0.3, zi, 0x5a5a60);
+    }
+    this.physics.addBox(new THREE.Vector3(x, top + 0.45, z - (n - 1) * 0.6), new THREE.Vector3(0.85, 0.45, (n * 1.2) / 2));
+    return n * 1.2;
+  }
+
+  private propCrates(x: number, top: number, z: number, rng: Rng): number {
+    const n = 2 + Math.floor(rng() * 4);
+    for (let i = 0; i < n; i++) {
+      const stack = rng() < 0.35 ? 1 : 0;
+      const zi = z - (i % 3) * 0.7;
+      const xi = x + (Math.floor(i / 3) - 0.5) * 0.7;
+      if (rng() < 0.3) {
+        this.propGeo(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 12), this.matrix(xi, top + 0.45, zi), pick(rng, [0x2f5f9a, 0xb02a2a, 0x2a7a3a, 0xd8a020]));
+      } else {
+        const col = pick(rng, [0x8b5a2b, 0x2f6fbf, 0xe0b020, 0x7a5230, 0xc84a2a]);
+        this.prop(0.62, 0.62, 0.62, xi, top + 0.31, zi, col, rng() * 0.3);
+        if (stack) this.prop(0.55, 0.55, 0.55, xi, top + 0.9, zi, pick(rng, [0x8b5a2b, 0x2f6fbf, 0xe0b020]), rng() * 0.5);
+      }
+    }
+    this.physics.addBox(new THREE.Vector3(x, top + 0.4, z - 0.7), new THREE.Vector3(0.7, 0.4, 1.05));
+    return 2.2;
+  }
+
+  private propShack(x: number, top: number, z: number, facing: 1 | -1, rng: Rng): number {
+    const wall = pick(rng, [0x8d8679, 0x6f8f7a, 0x9a6a4a, 0x7a7f9a, 0xa08a5a]);
+    const zc = z - 1.5;
+    this.prop(2.4, 2.6, 3, x, top + 1.3, zc, wall);
+    this.prop(2.6, 0.15, 3.2, x, top + 2.67, zc, 0x3a3a40);
+    const fx = x + facing * 1.21;
+    // Porte entrouverte : lumière chaude qui s'échappe
+    this.prop(0.03, 1.95, 0.95, fx, top + 0.98, zc + 0.5, 0x3a2a1a);
+    this.glow(0.02, 1.85, 0.12, fx + facing * 0.01, top + 0.95, zc + 0.02, 0xffc27a, 2.4);
+    this.glow(0.12, 0.08, 0.25, fx + facing * 0.06, top + 2.15, zc + 0.5, 0xffe0a0, 3);
+    // Fenêtre éclairée
+    this.glow(0.02, 0.45, 0.6, fx, top + 1.6, zc - 0.8, pick(rng, [0xffd08a, 0xbfe8ff, 0xffa8c8]), 1.6);
+    // Tuyau de ventilation fumant
+    this.propGeo(new THREE.CylinderGeometry(0.12, 0.12, 0.8, 8), this.matrix(x - facing * 0.6, top + 3.1, zc - 0.8), 0x5a5e66);
+    this.steam.addVent(new THREE.Vector3(x - facing * 0.6, top + 3.55, zc - 0.8), 3.5);
+    this.physics.addBox(new THREE.Vector3(x, top + 1.3, zc), new THREE.Vector3(1.2, 1.3, 1.5));
+    return 3;
+  }
+
+  private propLounge(x: number, top: number, z: number, rng: Rng): number {
+    const zc = z - 1;
+    this.prop(0.7, 0.05, 0.7, x, top + 0.72, zc, 0xe8e8e8);
+    this.prop(0.06, 0.7, 0.06, x, top + 0.35, zc, 0x8a8a90);
+    for (const dz of [-0.75, 0.75]) {
+      const col = pick(rng, [0xd83a3a, 0xe8e8e8, 0x3a6ad8, 0xf2c83a, 0x4ab84a]);
+      this.prop(0.45, 0.06, 0.45, x, top + 0.45, zc + dz, col);
+      this.prop(0.45, 0.45, 0.06, x, top + 0.68, zc + dz + Math.sign(dz) * 0.22, col);
+      for (const lx of [-0.18, 0.18]) this.prop(0.04, 0.45, 0.04, x + lx, top + 0.22, zc + dz, col);
+    }
+    // Canette et bol sur la table
+    this.prop(0.06, 0.12, 0.06, x + 0.15, top + 0.8, zc, pick(rng, [0xc8202a, 0x2a8a3a, 0x1f5fbf]));
+    this.prop(0.16, 0.06, 0.16, x - 0.12, top + 0.77, zc - 0.1, 0xf2ead8);
+    // Guirlande au-dessus du salon
+    this.prop(0.06, 2.4, 0.06, x, top + 1.2, z, 0x2a2a30);
+    this.prop(0.06, 2.4, 0.06, x, top + 1.2, z - 2, 0x2a2a30);
+    this.stringLights(x, z, x, z - 2, top + 2.35, rng);
+    return 2.2;
+  }
+
+  private propDish(x: number, top: number, z: number, rng: Rng): number {
+    this.prop(0.08, 1.2, 0.08, x, top + 0.6, z, 0x6a6a70);
+    const dish = new THREE.CylinderGeometry(0.7, 0.12, 0.25, 14);
+    this.propGeo(dish, this.matrix(x, top + 1.35, z, rng() * Math.PI * 2, 0, 1.1), 0xd8d8d8);
+    this.glow(0.05, 0.05, 0.05, x, top + 1.5, z, NEON.red, 3);
+    return 1.4;
+  }
+
+  private propAntenna(x: number, top: number, z: number, height: number): number {
     this.batchBox(this.darkMaterial, 0.12, height, 0.12, x, top + height / 2, z);
     this.batchBox(this.darkMaterial, 0.8, 0.05, 0.05, x, top + height * 0.7, z);
     this.batchBox(this.darkMaterial, 0.6, 0.05, 0.05, x, top + height * 0.85, z);
@@ -426,23 +741,34 @@ export class LevelBuilder {
     }
     this.batchBox(this.blinkMaterial, 0.18, 0.18, 0.18, x, top + height + 0.1, z);
     this.physics.addBox(new THREE.Vector3(x, top + height / 2, z), new THREE.Vector3(0.1, height / 2, 0.1));
+    return 1;
   }
+
+  /** Guirlande d'ampoules colorées légèrement affaissée entre deux points. */
+  private stringLights(x0: number, z0: number, x1: number, z1: number, y: number, rng: Rng): void {
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    const n = Math.max(2, Math.floor(len / 0.35));
+    const warm = rng() < 0.6;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const sag = Math.sin(t * Math.PI) * Math.min(0.5, len * 0.05);
+      const bx = x0 + (x1 - x0) * t;
+      const bz = z0 + (z1 - z0) * t;
+      this.prop(0.015, 0.015, len / n, bx, y - sag + 0.06, bz, 0x1a1a1a);
+      const col = warm ? pick(rng, BULBS.slice(0, 3)) : pick(rng, BULBS);
+      this.glow(0.07, 0.09, 0.07, bx, y - sag, bz, col, 3);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Murs, obstacles, tremplins, balise
+  // ---------------------------------------------------------------------------
 
   /**
    * Mur vertical pour le wall-run : `faceDir` est la direction (en X) de la face
-   * sur laquelle on court. Une affiche lumineuse et des bandes néon le balisent.
+   * sur laquelle on court. Une affiche pixel art et des bandes néon le balisent.
    */
-  private addWallRunWall(
-    x: number,
-    zStart: number,
-    zEnd: number,
-    top: number,
-    faceDir: 1 | -1,
-    color: number,
-    title: string,
-    subtitle: string,
-    seed: number,
-  ): void {
+  private addWallRunWall(x: number, zStart: number, zEnd: number, top: number, faceDir: 1 | -1, color: number, ad: BillboardKind): void {
     const thickness = 0.6;
     const length = Math.abs(zEnd - zStart);
     const cz = (zStart + zEnd) / 2;
@@ -457,9 +783,8 @@ export class LevelBuilder {
     const faceX = x + faceDir * (thickness / 2 + 0.015);
     const adHeight = 7;
     const adCenterY = top - 4.2;
-    const ad = createAdTexture(title, subtitle, faceDir > 0 ? '#00b8ff' : '#ff2bd6', faceDir > 0 ? '#7a2bff' : '#ff8a2b', seed);
-    const adMat = new THREE.MeshBasicMaterial({ map: ad, color: new THREE.Color(1, 1, 1).multiplyScalar(LIGHTING.signs) });
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(length - 0.4, adHeight), adMat);
+    const width = Math.round(((length - 0.4) / adHeight) * 32);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(length - 0.4, adHeight), this.signMaterial(this.billboard(ad, width), 1.05));
     plane.position.set(faceX, adCenterY, cz);
     plane.rotation.y = faceDir > 0 ? Math.PI / 2 : -Math.PI / 2;
     this.scene.add(plane);
@@ -494,8 +819,7 @@ export class LevelBuilder {
     this.exclusions.push({ x: cx - 4, z, r: 4 }, { x: cx + 4, z, r: 4 }, { x: cx, z, r: 4 });
 
     const geo = new THREE.BoxGeometry(width, h, thickness);
-    const ad = createAdTexture('▼ GLISSE ▼', 'C / CTRL — PASSE DESSOUS', '#ff8a2b', '#ff2040', 5 + Math.round(z));
-    const adMat = new THREE.MeshBasicMaterial({ map: ad, color: new THREE.Color(1, 1, 1).multiplyScalar(1.05 * LIGHTING.signs) });
+    const adMat = this.signMaterial(this.billboard('glide', Math.round((width / h) * 32)), 1.05);
     const mesh = new THREE.Mesh(geo, [this.panelMaterial, this.panelMaterial, this.panelMaterial, this.panelMaterial, adMat, adMat]);
     mesh.position.set(cx, cy, z);
     this.scene.add(mesh);
@@ -644,29 +968,28 @@ export class LevelBuilder {
     this.scene.add(light);
   }
 
-  /** Enseignes verticales sur les façades visibles depuis le parcours. */
+  /** Enseignes en pixel art sur les façades visibles depuis le parcours. */
   private addCourseSigns(): void {
-    // texte, couleur, x, y, z de la façade avant (+Z) de l'immeuble
+    // texte, schéma de couleurs, x, y, z de la façade avant (+Z) de l'immeuble
     const signs: [string, number, number, number, number][] = [
-      ['HOTEL', NEON.magenta, 5, -5, -38],
-      ['ラーメン', NEON.orange, -6, -7, -38],
-      ['24H', NEON.cyan, 6, -6, -104],
-      ['電脳街', NEON.purple, -6, -9, -104],
-      ['CLUB', NEON.magenta, 5, 2, -146],
-      ['BAR', NEON.green, -5, 1, -146],
-      ['未来', NEON.cyan, 6, -3, -206],
-      ['NOODLES', NEON.yellow, -5, -2, -206],
-      ['KALLIOPE', NEON.cyan, -5, 4, -276],
-      ['夜', NEON.red, 7, 3, -276],
+      ['HOTEL', 3, 5, -5, -38],
+      ['RAMEN', 2, -6, -7, -38],
+      ['24H', 7, 6, -6, -104],
+      ['KARAOKE', 4, -5, -9, -104],
+      ['CLUB', 0, 5, 2, -146],
+      ['BAR', 1, -5, 1, -146],
+      ['CAFE', 5, 6, -3, -206],
+      ['NOODLES', 8, -5, -2, -206],
+      ['KALLIOPE', 6, -5, 4, -276],
+      ['LIVE', 0, 7, 3, -276],
     ];
-    for (const [text, color, x, y, z] of signs) {
-      const hex = '#' + new THREE.Color(color).getHexString();
+    for (const [text, scheme, x, y, z] of signs) {
       const vertical = text.length <= 4;
-      const tex = createSignTexture(text, hex, vertical);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1, 1, 1).multiplyScalar(1.8 * LIGHTING.signs), transparent: true });
-      const w = vertical ? 1.6 : 6;
-      const h = vertical ? 6.4 : 1.5;
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+      const { texture, aspect } = createPixelSign(text, SIGN_SCHEMES[scheme], vertical);
+      const mat = this.signMaterial(texture, 1.6);
+      mat.transparent = true;
+      const h = vertical ? 6.4 : 1.6;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(h * aspect, h), mat);
       plane.position.set(x, y, z + 0.06);
       this.scene.add(plane);
       this.flickers.push({ material: mat, base: 1, phase: this.rng() * 100 });
@@ -679,21 +1002,15 @@ export class LevelBuilder {
 
   private buildCity(): void {
     const rng = createRng(4242);
-    const sides = { pos: [] as number[], nrm: [] as number[], uv: [] as number[] };
-    const tops = { pos: [] as number[], nrm: [] as number[], uv: [] as number[] };
+    type Buf = { pos: number[]; nrm: number[]; uv: number[] };
+    const newBuf = (): Buf => ({ pos: [], nrm: [], uv: [] });
+    const sides: Buf[] = this.facadeMaterials.map(newBuf);
+    const tops = newBuf();
     const blinkers: THREE.Vector3[] = [];
     const signSpots: { x: number; y: number; z: number; face: number }[] = [];
+    const rooftopBoards: { x: number; y: number; z: number; face: number }[] = [];
 
-    const quad = (
-      target: { pos: number[]; nrm: number[]; uv: number[] },
-      a: number[],
-      b: number[],
-      c: number[],
-      d: number[],
-      n: number[],
-      uvs: number[][],
-    ) => {
-      // Deux triangles a-b-c, a-c-d
+    const quad = (target: Buf, a: number[], b: number[], c: number[], d: number[], n: number[], uvs: number[][]) => {
       for (const [p, t] of [
         [a, uvs[0]],
         [b, uvs[1]],
@@ -708,52 +1025,45 @@ export class LevelBuilder {
       }
     };
 
-    const addTower = (cx: number, cz: number, w: number, d: number, top: number, bottom: number) => {
+    const addTower = (cx: number, cz: number, w: number, d: number, top: number, bottom: number, dense: boolean) => {
+      const buf = sides[Math.floor(rng() * sides.length)];
+      const tu = dense ? FACADE_TILE_U * 0.6 : FACADE_TILE_U;
+      const tv = dense ? FACADE_TILE_V * 0.6 : FACADE_TILE_V;
       const x0 = cx - w / 2;
       const x1 = cx + w / 2;
       const z0 = cz - d / 2;
       const z1 = cz + d / 2;
-      const ou = Math.floor(rng() * 16) / 16;
-      const ov = Math.floor(rng() * 32) / 32;
+      const ou = Math.floor(rng() * FACADE_CELLS) / FACADE_CELLS;
+      const ov = Math.floor(rng() * FACADE_CELLS) / FACADE_CELLS;
       const vB = ov;
-      const vT = ov + (top - bottom) / WINDOW_TILE_V;
-      const uw = w / WINDOW_TILE_U;
-      const ud = d / WINDOW_TILE_U;
-      // +Z
-      quad(sides, [x0, bottom, z1], [x1, bottom, z1], [x1, top, z1], [x0, top, z1], [0, 0, 1], [
-        [ou, vB],
-        [ou + uw, vB],
-        [ou + uw, vT],
-        [ou, vT],
-      ]);
-      // -Z
-      quad(sides, [x1, bottom, z0], [x0, bottom, z0], [x0, top, z0], [x1, top, z0], [0, 0, -1], [
-        [ou, vB],
-        [ou + uw, vB],
-        [ou + uw, vT],
-        [ou, vT],
-      ]);
-      // +X
-      quad(sides, [x1, bottom, z1], [x1, bottom, z0], [x1, top, z0], [x1, top, z1], [1, 0, 0], [
-        [ou, vB],
-        [ou + ud, vB],
-        [ou + ud, vT],
-        [ou, vT],
-      ]);
-      // -X
-      quad(sides, [x0, bottom, z0], [x0, bottom, z1], [x0, top, z1], [x0, top, z0], [-1, 0, 0], [
-        [ou, vB],
-        [ou + ud, vB],
-        [ou + ud, vT],
-        [ou, vT],
-      ]);
-      // Toit
-      quad(tops, [x0, top, z1], [x1, top, z1], [x1, top, z0], [x0, top, z0], [0, 1, 0], [
-        [0, 0],
-        [1, 0],
-        [1, 1],
-        [0, 1],
-      ]);
+      const vT = ov + (top - bottom) / tv;
+      const uw = w / tu;
+      const ud = d / tu;
+      quad(buf, [x0, bottom, z1], [x1, bottom, z1], [x1, top, z1], [x0, top, z1], [0, 0, 1], [[ou, vB], [ou + uw, vB], [ou + uw, vT], [ou, vT]]);
+      quad(buf, [x1, bottom, z0], [x0, bottom, z0], [x0, top, z0], [x1, top, z0], [0, 0, -1], [[ou, vB], [ou + uw, vB], [ou + uw, vT], [ou, vT]]);
+      quad(buf, [x1, bottom, z1], [x1, bottom, z0], [x1, top, z0], [x1, top, z1], [1, 0, 0], [[ou, vB], [ou + ud, vB], [ou + ud, vT], [ou, vT]]);
+      quad(buf, [x0, bottom, z0], [x0, bottom, z1], [x0, top, z1], [x0, top, z0], [-1, 0, 0], [[ou, vB], [ou + ud, vB], [ou + ud, vT], [ou, vT]]);
+      const r = ROOF_TILE;
+      quad(tops, [x0, top, z1], [x1, top, z1], [x1, top, z0], [x0, top, z0], [0, 1, 0], [[x0 / r, z1 / r], [x1 / r, z1 / r], [x1 / r, z0 / r], [x0 / r, z0 / r]]);
+    };
+
+    /** Toits de la ville : climatiseurs, réservoirs, cabanons colorés. */
+    const rooftopClutter = (cx: number, cz: number, w: number, d: number, top: number) => {
+      const n = 1 + Math.floor(rng() * 3);
+      for (let i = 0; i < n; i++) {
+        const x = cx + (rng() - 0.5) * (w - 4);
+        const z = cz + (rng() - 0.5) * (d - 4);
+        const kind = rng();
+        if (kind < 0.4) {
+          this.prop(2.5, 1.6, 2, x, top + 0.8, z, pick(rng, [0xd8d2c0, 0xb8bcc4, 0x9aa0a8]));
+        } else if (kind < 0.7) {
+          this.propGeo(new THREE.CylinderGeometry(1.4, 1.4, 3, 10), this.matrix(x, top + 2.6, z), pick(rng, [0x6b4a2f, 0x2f5f9a, 0xd8d8d0]));
+          this.prop(2.2, 1.1, 2.2, x, top + 0.55, z, 0x2a2a30);
+        } else {
+          this.prop(3, 2.8, 3.5, x, top + 1.4, z, pick(rng, [0x8d8679, 0x6f8f7a, 0x9a6a4a, 0x7a7f9a]));
+          this.glow(0.05, 1.8, 0.9, x + 1.52, top + 0.95, z, pick(rng, [0xffc27a, 0xbfe8ff, 0xffa8c8]), 1.4);
+        }
+      }
     };
 
     // Bandes de tours à gauche et à droite du parcours
@@ -769,15 +1079,15 @@ export class LevelBuilder {
           const top = BASE_Y + h;
           const cx = side * (xDist + w / 2);
           const cz = z - d / 2;
-          addTower(cx, cz, w, d, top, BASE_Y);
+          addTower(cx, cz, w, d, top, BASE_Y, far);
           if (h > 150) blinkers.push(new THREE.Vector3(cx, top + 1.5, cz));
-          if (!far && rng() < 0.35) {
-            signSpots.push({ x: cx - side * (w / 2 + 0.1), y: top - 6 - rng() * 30, z: cz + (rng() - 0.5) * d * 0.5, face: -side });
+          if (!far) {
+            if (top < 60) rooftopClutter(cx, cz, w, d, top);
+            if (rng() < 0.4) signSpots.push({ x: cx - side * (w / 2 + 0.1), y: top - 6 - rng() * 30, z: cz + (rng() - 0.5) * d * 0.5, face: -side });
+            if (xDist < 70 && top < 40 && rng() < 0.3) rooftopBoards.push({ x: cx - side * (w / 2 - 3), y: top, z: cz, face: -side });
           }
           // Étages en retrait (silhouettes plus intéressantes)
-          if (h > 120 && rng() < 0.6) {
-            addTower(cx, cz, w * 0.6, d * 0.6, top + 10 + rng() * 30, top);
-          }
+          if (h > 120 && rng() < 0.6) addTower(cx, cz, w * 0.6, d * 0.6, top + 10 + rng() * 30, top, far);
           xDist += w + 3 + rng() * 10;
         }
         z -= d + 4 + rng() * 10;
@@ -790,17 +1100,19 @@ export class LevelBuilder {
         const w = 8 + rng() * 6;
         const d = 10 + rng() * 6;
         const top = -34 - rng() * 18;
-        addTower(side * (13 + w / 2 + rng() * 3), z, w, d, top, BASE_Y);
+        const cx = side * (13 + w / 2 + rng() * 3);
+        addTower(cx, z, w, d, top, BASE_Y, false);
+        rooftopClutter(cx, z, w, d, top);
       }
     }
     // Rideau de tours au loin, droit devant et derrière
     for (let x = -260; x < 260; x += 20 + rng() * 15) {
       const w = 14 + rng() * 18;
-      addTower(x, -720 - rng() * 40, w, 20, BASE_Y + 80 + rng() * 260, BASE_Y);
-      addTower(x, 330 + rng() * 40, w, 20, BASE_Y + 60 + rng() * 200, BASE_Y);
+      addTower(x, -720 - rng() * 40, w, 20, BASE_Y + 80 + rng() * 260, BASE_Y, true);
+      addTower(x, 330 + rng() * 40, w, 20, BASE_Y + 60 + rng() * 200, BASE_Y, true);
     }
 
-    const buildGeo = (data: { pos: number[]; nrm: number[]; uv: number[] }) => {
+    const buildGeo = (data: Buf) => {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(data.pos, 3));
       g.setAttribute('normal', new THREE.Float32BufferAttribute(data.nrm, 3));
@@ -808,10 +1120,10 @@ export class LevelBuilder {
       g.computeBoundingSphere();
       return g;
     };
-    const cityMat = this.windowMaterials[1].clone();
-    cityMat.emissiveIntensity = 1.1 * LIGHTING.windows;
-    this.scene.add(new THREE.Mesh(buildGeo(sides), cityMat));
-    this.scene.add(new THREE.Mesh(buildGeo(tops), this.darkMaterial));
+    sides.forEach((buf, i) => {
+      if (buf.pos.length > 0) this.scene.add(new THREE.Mesh(buildGeo(buf), this.facadeMaterials[i]));
+    });
+    this.scene.add(new THREE.Mesh(buildGeo(tops), this.roofMaterials.get('tar')!));
 
     // Feux d'obstacle aérien clignotants
     if (blinkers.length > 0) {
@@ -827,36 +1139,44 @@ export class LevelBuilder {
       this.scene.add(inst);
     }
 
-    // Enseignes géantes
-    const words = ['ネオン', 'HOTEL', 'サイバー', 'BAR', '電脳', 'CLUB', '24/7', 'RAMEN', '夜市', 'ARCADE', '未来', 'SUSHI'];
-    const colors = ['#ff2bd6', '#00e5ff', '#8a4dff', '#ff8a2b', '#2bffb0', '#ffd23b'];
+    // Enseignes pixel art sur les façades
+    const words = ['HOTEL', 'BAR', 'CLUB', 'RAMEN', 'SUSHI', 'ARCADE', '24/7', 'KARAOKE', 'NOODLES', 'PHARMA', 'LIVE', 'TAXI', 'CAFE', 'BOOKS', 'DINER', 'GYM', 'OPEN', 'TATTOO', 'BAO', 'DISCO'];
     signSpots.forEach((s, i) => {
       const text = words[i % words.length];
-      const color = colors[Math.floor(rng() * colors.length)];
-      const vertical = text.length <= 4;
-      const tex = createSignTexture(text, color, vertical);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1, 1, 1).multiplyScalar(2.2 * LIGHTING.signs), transparent: true });
-      const scale = 3 + rng() * 3;
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? scale : scale * 4, vertical ? scale * 4 : scale), mat);
+      const vertical = text.length <= 4 && rng() < 0.7;
+      const { texture, aspect } = createPixelSign(text, pick(rng, SIGN_SCHEMES), vertical);
+      const mat = this.signMaterial(texture, 1.9);
+      const hgt = vertical ? 10 + rng() * 6 : 3 + rng() * 2;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(hgt * aspect, hgt), mat);
       plane.position.set(s.x, s.y, s.z);
       plane.rotation.y = s.face > 0 ? Math.PI / 2 : -Math.PI / 2;
       this.scene.add(plane);
-      if (rng() < 0.3) this.flickers.push({ material: mat, base: 1, phase: rng() * 100 });
+      if (rng() < 0.3) {
+        mat.transparent = true;
+        this.flickers.push({ material: mat, base: 1, phase: rng() * 100 });
+      }
     });
 
-    // Quelques panneaux publicitaires holographiques géants
-    const ads: [string, string, string, string][] = [
-      ['SANDEVISTAN', 'TIME IS A LUXURY', '#00e5ff', '#2bffb0'],
-      ['MANTIS', 'CUT THROUGH THE NIGHT', '#ff2bd6', '#8a4dff'],
-      ['VERTIGO', 'DON\'T LOOK DOWN', '#ff8a2b', '#ff2040'],
-      ['KALLIOPE', 'YOUR VOICE. OUR CITY.', '#8a4dff', '#00e5ff'],
-    ];
-    ads.forEach(([title, sub, a, b], i) => {
-      const tex = createAdTexture(title, sub, a, b, 900 + i);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1, 1, 1).multiplyScalar(1.15 * LIGHTING.signs), side: THREE.DoubleSide });
+    // Panneaux publicitaires sur les toits (cadre + affiche pixel art)
+    const kinds: BillboardKind[] = ['ramen', 'cola', 'cat', 'koi', 'pharmacy', 'arcade', 'kalliope'];
+    rooftopBoards.forEach((b, i) => {
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.signMaterial(this.billboard(kinds[i % kinds.length]), 1.2));
+      plane.position.set(b.x, b.y + 5.5, b.z);
+      plane.rotation.y = b.face > 0 ? Math.PI / 2 : -Math.PI / 2;
+      this.scene.add(plane);
+      for (const dz of [-4.5, 4.5]) this.prop(0.25, 5.5, 0.25, b.x - b.face * 0.2, b.y + 2.75, b.z + dz, 0x2a2a30);
+      this.prop(0.2, 0.2, 12.4, b.x - b.face * 0.2, b.y + 2.45, b.z, 0x2a2a30);
+      for (let k = -2; k <= 2; k++) this.glow(0.3, 0.12, 0.3, b.x + b.face * 0.4, b.y + 8.6, b.z + k * 2.6, NEON.warm, 2.5);
+    });
+
+    // Affiches géantes flottantes
+    const ads: BillboardKind[] = ['cola', 'cat', 'arcade', 'kalliope', 'pharmacy', 'vertigo'];
+    ads.forEach((kind, i) => {
+      const mat = this.signMaterial(this.billboard(kind), 1.15);
+      mat.side = THREE.DoubleSide;
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(48, 24), mat);
       const side = i % 2 === 0 ? 1 : -1;
-      plane.position.set(side * 42, 32 + i * 6, -60 - i * 85);
+      plane.position.set(side * 42, 32 + (i % 3) * 6, -40 - i * 70);
       plane.rotation.y = side > 0 ? -Math.PI / 2 + 0.35 : Math.PI / 2 - 0.35;
       this.scene.add(plane);
     });
@@ -869,21 +1189,21 @@ export class LevelBuilder {
     const headGeo = new THREE.BoxGeometry(1.5, 0.14, 0.08).translate(0, 0.05, -2.12);
     const tailGeo = new THREE.BoxGeometry(1.6, 0.12, 0.08).translate(0, 0.05, 2.12);
     const underGeo = new THREE.BoxGeometry(1.2, 0.04, 3.4).translate(0, -0.32, 0);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x15151c, metalness: 0.9, roughness: 0.3 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.6, roughness: 0.35 });
     const headMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 6, 5.5).multiplyScalar(LIGHTING.neon), toneMapped: false });
     const tailMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.3, 0.4).multiplyScalar(LIGHTING.neon), toneMapped: false });
-    const underMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 2.5, 4).multiplyScalar(LIGHTING.neon), toneMapped: false });
-    const meshes = [
-      new THREE.InstancedMesh(bodyGeo, bodyMat, count),
-      new THREE.InstancedMesh(headGeo, headMat, count),
-      new THREE.InstancedMesh(tailGeo, tailMat, count),
-      new THREE.InstancedMesh(underGeo, underMat, count),
-    ];
+    const underMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1).multiplyScalar(3 * LIGHTING.neon), toneMapped: false });
+    const body = new THREE.InstancedMesh(bodyGeo, bodyMat, count);
+    const under = new THREE.InstancedMesh(underGeo, underMat, count);
+    const meshes = [body, new THREE.InstancedMesh(headGeo, headMat, count), new THREE.InstancedMesh(tailGeo, tailMat, count), under];
     for (const m of meshes) {
       m.frustumCulled = false;
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       this.scene.add(m);
     }
+    // Taxis jaunes, berlines, utilitaires… chacun avec sa lueur de châssis
+    const bodies = [0xe0b020, 0xd8d8d8, 0xb02020, 0x1f8f8f, 0x15151c, 0xd8701f, 0x1f4fbf, 0x3a2a5a];
+    const glows = [NEON.cyan, NEON.pink, NEON.lime, NEON.amber, NEON.purple, NEON.red];
     const cars: { x: number; y: number; z: number; speed: number; dir: number }[] = [];
     for (let i = 0; i < count; i++) {
       const side = rng() < 0.5 ? -1 : 1;
@@ -896,6 +1216,8 @@ export class LevelBuilder {
         speed: 25 + rng() * 30,
         dir,
       });
+      body.setColorAt(i, this.tmpColor.set(pick(rng, bodies)));
+      under.setColorAt(i, this.tmpColor.set(pick(rng, glows)));
     }
     this.traffic = { meshes, cars };
     this.updateTraffic(0);
