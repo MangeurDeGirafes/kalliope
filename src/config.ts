@@ -88,7 +88,8 @@ export const DASH = {
   exitSpeed: 15,
   maxCharges: 2,
   rechargeTime: 1.4,
-  airOnly: true,
+  /** false : le dash fonctionne aussi au sol. */
+  airOnly: false,
   fovKick: 14,
 } as const;
 

@@ -176,7 +176,7 @@ export class LevelBuilder {
     this.addBuilding(0, -164, 16, 36, 8, NEON.orange, 0);
     this.queueRoofProps(0, -164, 16, 36, 8, 41);
     this.addSlideBarrier(0, -160, 16, 8);
-    this.addHoloSign(['SHIFT EN L\'AIR : DASH', 'MUR À GAUCHE ◄'], new THREE.Vector3(-3, 11.4, -178), NEON.yellow, 5);
+    this.addHoloSign(['SHIFT : DASH', 'MUR À GAUCHE ◄'], new THREE.Vector3(-3, 11.4, -178), NEON.yellow, 5);
     guard(5, 8, -170, 0);
     guard(-4.5, 8, -176, 0.3);
     drone(0, 14, -166);

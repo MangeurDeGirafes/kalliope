@@ -21,7 +21,7 @@ export interface PlayerListener {
 
 /**
  * Contrôleur FPS de parkour : course, saut, double saut, glissade, wall-run,
- * franchissement de rebords, dash aérien et Sandevistan.
+ * franchissement de rebords, dash (au sol ou en l'air) et Sandevistan.
  * Basé sur le KinematicCharacterController de Rapier (capsule sans corps rigide).
  */
 export class PlayerController {
@@ -74,6 +74,8 @@ export class PlayerController {
   private dashRecharge = 0;
   private readonly dashDir = new THREE.Vector3();
   private mantleCooldown = 0;
+  /** Temps passé en l'air depuis le dernier contact avec le sol. */
+  private airTime = 0;
   /** Intensité de l'entrée de déplacement (1 au clavier, analogique au joystick). */
   private moveScale = 0;
   private lungeTimer = 0;
@@ -183,6 +185,7 @@ export class PlayerController {
     this.lastWallNormal.set(0, 0, 0);
     this.mantleCooldown = 0;
     this.lungeTimer = 0;
+    this.airTime = 0;
     this.invulnerable = 0;
     this.regenTimer = 0;
     this.roll = 0;
@@ -605,6 +608,11 @@ export class PlayerController {
     this.dashing = false;
     const exit = Math.max(DASH.exitSpeed, MOVEMENT.runSpeed);
     this.velocity.set(this.dashDir.x * exit, 0, this.dashDir.z * exit);
+    // Dash au sol + glissade maintenue : on enchaîne en glissade sans perdre l'élan.
+    if (this.grounded && this.slideHeld && this.slideCooldown <= 0) {
+      if (!this.crouched) this.setCrouched(true);
+      this.startSlide();
+    }
   }
 
   // --- Wall-run -------------------------------------------------------------
@@ -796,14 +804,32 @@ export class PlayerController {
     const mv = this.controller.computedMovement();
 
     // On retire de la vitesse la composante qui s'enfonce dans les obstacles.
+    // Sol, plafond et murs sont traités séparément : une normale de sol très
+    // légèrement inclinée ne doit pas convertir l'élan horizontal en vitesse verticale
+    // (le joueur « sautillait » à grande vitesse).
     const n = this.tmpN;
     for (let i = 0; i < this.controller.numComputedCollisions(); i++) {
       const c = this.controller.computedCollision(i);
       if (!c) continue;
       n.set(c.normal1.x, c.normal1.y, c.normal1.z);
       if (n.dot(desired) > 0) n.negate();
-      const vn = this.velocity.dot(n);
-      if (vn < 0) this.velocity.addScaledVector(n, -vn);
+      if (n.y > 0.7) {
+        if (this.velocity.y < 0) this.velocity.y = 0;
+        continue;
+      }
+      if (n.y < -0.7) {
+        if (this.velocity.y > 0) this.velocity.y = 0;
+        continue;
+      }
+      const len = Math.hypot(n.x, n.z);
+      if (len < 1e-4) continue;
+      const nx = n.x / len;
+      const nz = n.z / len;
+      const vn = this.velocity.x * nx + this.velocity.z * nz;
+      if (vn < 0) {
+        this.velocity.x -= nx * vn;
+        this.velocity.z -= nz * vn;
+      }
     }
 
     this.position.x += mv.x;
@@ -812,7 +838,9 @@ export class PlayerController {
     this.collider.setTranslation(this.position);
 
     const groundedNow = this.controller.computedGrounded() && this.justJumpedTimer <= 0 && this.velocity.y <= 0.5;
+    if (!groundedNow) this.airTime += dt;
     if (groundedNow && !this.grounded) this.onLand(-preVy);
+    if (groundedNow) this.airTime = 0;
     this.grounded = groundedNow;
   }
 
@@ -830,9 +858,11 @@ export class PlayerController {
       this.listener?.onLand?.(this.tmp2, intensity);
     }
     if (this.slideHeld && this.horizontalSpeed >= SLIDE.minSpeed) {
-      // Atterrissage en glissade : l'élan aérien est conservé.
+      // Atterrissage en glissade : l'élan aérien est conservé. Le bonus de vitesse
+      // n'est accordé qu'après un vrai saut, pas après un simple décrochage du sol.
       if (!this.crouched) this.setCrouched(true);
-      this.startSlide();
+      if (this.airTime > 0.2) this.startSlide();
+      else this.sliding = true;
     }
   }
 
@@ -861,7 +891,7 @@ export class PlayerController {
 
     // Balancement de tête + bruits de pas
     const hSpeed = this.horizontalSpeed;
-    const bobbing = this.alive && this.grounded && !this.sliding && hSpeed > 1;
+    const bobbing = this.alive && this.grounded && !this.sliding && !this.dashing && hSpeed > 1;
     this.bobWeight += ((bobbing ? 1 : 0) - this.bobWeight) * smooth(10, dt);
     if (bobbing) {
       const before = Math.floor(this.bobPhase / Math.PI);

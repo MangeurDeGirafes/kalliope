@@ -185,7 +185,7 @@ export class HUD {
           <div><kbd>Souris</kbd><span>Viser</span></div>
           <div><kbd>Espace</kbd><span>Saut · double saut · saut mural</span></div>
           <div><kbd>C</kbd>/<kbd>Ctrl</kbd><span>Glissade (garde l'élan)</span></div>
-          <div><kbd>Shift</kbd><span>Dash aérien</span></div>
+          <div><kbd>Shift</kbd><span>Dash (au sol ou en l'air)</span></div>
           <div><kbd>Avancer</kbd><span>contre un mur en l'air : wall-run</span></div>
           <div><kbd>Clic G</kbd><span>Attaquer / tirer</span></div>
           <div><kbd>Clic D</kbd><span>Sandevistan (ralenti)</span></div>
@@ -196,7 +196,7 @@ export class HUD {
           <div><kbd>Pouce droit</kbd><span>Glisser : viser</span></div>
           <div><kbd>SAUT</kbd><span>Saut · double saut · saut mural</span></div>
           <div><kbd>GLISSE</kbd><span>Glissade (garde l'élan)</span></div>
-          <div><kbd>DASH</kbd><span>Dash aérien</span></div>
+          <div><kbd>DASH</kbd><span>Dash (au sol ou en l'air)</span></div>
           <div><kbd>ATTAQUE</kbd><span>Maintenir pour enchaîner, glisser pour viser</span></div>
           <div><kbd>SANDEVISTAN</kbd><span>Ralenti</span></div>
           <div><kbd>Joystick ↑</kbd><span>contre un mur en l'air : wall-run</span></div>
