@@ -198,9 +198,9 @@ export class HUD {
           <div><kbd>GLISSE</kbd><span>Glissade (garde l'élan)</span></div>
           <div><kbd>DASH</kbd><span>Dash (au sol ou en l'air)</span></div>
           <div><kbd>ATTAQUE</kbd><span>Maintenir pour enchaîner, glisser pour viser</span></div>
-          <div><kbd>SANDEVISTAN</kbd><span>Ralenti</span></div>
+          <div><kbd>⧗</kbd><span>Sandevistan (en haut à droite)</span></div>
           <div><kbd>Joystick ↑</kbd><span>contre un mur en l'air : wall-run</span></div>
-          <div><kbd>ARME</kbd><span>Lames Mantis / Pistolet</span></div>
+          <div><kbd>⇄</kbd><span>Changer d'arme (en haut à droite)</span></div>
           <div><kbd>↻</kbd> <kbd>❚❚</kbd><span>Recommencer · pause</span></div>`;
     this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show start';

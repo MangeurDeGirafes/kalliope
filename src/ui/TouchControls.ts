@@ -97,8 +97,8 @@ export class TouchControls {
     const specs: ButtonSpec[] = [
       { key: 'attack', label: 'ATTAQUE', icon: ICONS.blades, mouse: MouseButton.Left, lookThrough: true },
       { key: 'jump', label: 'SAUT', icon: ICONS.jump, action: 'jump', lookThrough: true },
-      { key: 'slide', label: 'GLISSE', icon: ICONS.slide, action: 'slide' },
-      { key: 'dash', label: 'DASH', icon: ICONS.dash, action: 'dash' },
+      { key: 'slide', label: 'GLISSE', icon: ICONS.slide, action: 'slide', lookThrough: true },
+      { key: 'dash', label: 'DASH', icon: ICONS.dash, action: 'dash', lookThrough: true },
       { key: 'sandevistan', label: 'SANDEVISTAN', icon: ICONS.sandevistan, mouse: MouseButton.Right },
       { key: 'swap', label: 'ARME', icon: ICONS.swap, tap: () => this.pulseAction(this.weapon === 'blades' ? 'weapon2' : 'weapon1') },
       { key: 'restart', label: '', icon: ICONS.restart, tap: () => this.pulseAction('restart') },

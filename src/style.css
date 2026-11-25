@@ -704,7 +704,7 @@ body.touch-mode {
 }
 @media (max-height: 400px) {
   .touch-ui {
-    --u: 0.84;
+    --u: 0.92;
   }
 }
 
@@ -796,8 +796,8 @@ body.touch-mode {
   transition: transform 0.06s, background 0.06s;
 }
 .touch-btn .icon {
-  width: 46%;
-  height: 46%;
+  width: 40%;
+  height: 40%;
   display: block;
   filter: drop-shadow(0 0 4px currentColor);
 }
@@ -806,24 +806,36 @@ body.touch-mode {
   height: 100%;
 }
 .touch-btn .label {
-  position: absolute;
-  bottom: calc(var(--u) * -15px);
-  font-size: 9px;
-  letter-spacing: 0.18em;
+  margin-top: calc(var(--u) * 3px);
+  font-size: calc(var(--u) * 9.5px);
+  font-weight: 700;
+  letter-spacing: 0.16em;
   white-space: nowrap;
-  color: rgba(232, 246, 255, 0.75);
+  color: rgba(232, 246, 255, 0.82);
   text-shadow: 0 0 4px #000;
 }
 .touch-btn.pressed {
-  transform: scale(0.9);
+  transform: scale(0.92);
   background: radial-gradient(circle, rgba(0, 229, 255, 0.45), rgba(0, 60, 80, 0.7));
   color: #fff;
 }
 
+/*
+ * Grappe du pouce droit : ATTAQUE dans le coin, SAUT / GLISSE / DASH en arc
+ * à égale distance (126 px) autour de lui (gauche, diagonale, au-dessus).
+ * --cx / --cy = centre du bouton mesuré depuis le coin bas-droit de l'écran.
+ */
+.tb-attack,
+.tb-jump,
+.tb-slide,
+.tb-dash {
+  right: calc(env(safe-area-inset-right) + var(--u) * (var(--cx) - var(--size) / 2));
+  bottom: calc(env(safe-area-inset-bottom) + var(--u) * (var(--cy) - var(--size) / 2));
+}
 .tb-attack {
-  --size: 88px;
-  right: calc(env(safe-area-inset-right) + var(--u) * 26px);
-  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 34px);
+  --size: 92px;
+  --cx: 68px;
+  --cy: 76px;
   color: var(--magenta);
   border-color: rgba(255, 43, 214, 0.75);
   box-shadow: 0 0 16px rgba(255, 43, 214, 0.4), inset 0 0 14px rgba(255, 43, 214, 0.15);
@@ -832,17 +844,25 @@ body.touch-mode {
   background: radial-gradient(circle, rgba(255, 43, 214, 0.5), rgba(80, 0, 60, 0.7));
 }
 .tb-jump {
-  --size: 74px;
-  right: calc(env(safe-area-inset-right) + var(--u) * 132px);
-  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 22px);
+  --size: 86px;
+  --cx: 194px;
+  --cy: 76px;
 }
 .tb-slide {
-  right: calc(env(safe-area-inset-right) + var(--u) * 222px);
-  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 28px);
+  --size: 80px;
+  --cx: 157px;
+  --cy: 165px;
 }
 .tb-dash {
-  right: calc(env(safe-area-inset-right) + var(--u) * 142px);
-  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 118px);
+  --size: 80px;
+  --cx: 68px;
+  --cy: 202px;
+}
+.tb-jump .icon,
+.tb-slide .icon,
+.tb-dash .icon {
+  width: 44%;
+  height: 44%;
 }
 .tb-dash.empty {
   opacity: 0.4;
@@ -850,28 +870,43 @@ body.touch-mode {
 .tb-dash::after {
   content: attr(data-charges);
   position: absolute;
-  top: calc(var(--u) * -4px);
-  right: calc(var(--u) * -4px);
-  width: 18px;
-  height: 18px;
+  top: calc(var(--u) * 2px);
+  right: calc(var(--u) * 2px);
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  font-size: 11px;
-  line-height: 18px;
+  font-size: 12px;
+  line-height: 20px;
   text-align: center;
   color: #fff;
   background: var(--magenta);
   box-shadow: 0 0 8px var(--magenta);
 }
+
+/* Commandes secondaires : petites, rangées en haut à droite sous pause / recommencer */
+.tb-sandevistan,
+.tb-swap {
+  --size: 44px;
+  top: calc(env(safe-area-inset-top) + 60px);
+}
+.tb-sandevistan .label,
+.tb-swap .label {
+  display: none;
+}
+.tb-sandevistan .icon,
+.tb-swap .icon {
+  width: 46%;
+  height: 46%;
+}
 .tb-sandevistan {
   --energy: 100;
-  right: calc(env(safe-area-inset-right) + var(--u) * 42px);
-  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 146px);
+  right: calc(env(safe-area-inset-right) + 14px);
   color: var(--green);
   border-color: transparent;
   background:
     radial-gradient(circle, rgba(5, 20, 16, 0.8) 62%, transparent 63%),
     conic-gradient(var(--green) calc(var(--energy) * 1%), rgba(43, 255, 176, 0.15) 0);
-  box-shadow: 0 0 12px rgba(43, 255, 176, 0.3);
+  box-shadow: 0 0 10px rgba(43, 255, 176, 0.25);
 }
 .tb-sandevistan.active {
   color: #fff;
@@ -879,11 +914,10 @@ body.touch-mode {
   animation: blink 0.4s infinite alternate;
 }
 .tb-swap {
-  --size: 48px;
-  right: calc(env(safe-area-inset-right) + var(--u) * 232px);
-  bottom: calc(env(safe-area-inset-bottom) + var(--u) * 112px);
+  right: calc(env(safe-area-inset-right) + 64px);
   color: var(--yellow);
-  border-color: rgba(255, 210, 59, 0.6);
+  border-color: rgba(255, 210, 59, 0.55);
+  box-shadow: none;
 }
 .tb-pause,
 .tb-restart {
@@ -894,8 +928,8 @@ body.touch-mode {
   box-shadow: none;
 }
 .tb-pause {
-  right: calc(env(safe-area-inset-right) + 14px);
+  right: calc(env(safe-area-inset-right) + 16px);
 }
 .tb-restart {
-  right: calc(env(safe-area-inset-right) + 62px);
+  right: calc(env(safe-area-inset-right) + 66px);
 }
