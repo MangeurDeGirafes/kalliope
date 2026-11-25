@@ -19,6 +19,7 @@ export class AudioSynthesizer {
   private wallRunLoop: LoopChannel | null = null;
   private slideLoop: LoopChannel | null = null;
   private sandevistanHum: { gain: GainNode; osc: OscillatorNode } | null = null;
+  private chargeHum: { gain: GainNode; osc: OscillatorNode; sub: OscillatorNode; level: number } | null = null;
   /** Facteur de hauteur global (abaissé pendant le Sandevistan). */
   private pitch = 1;
 
@@ -73,6 +74,7 @@ export class AudioSynthesizer {
     this.wallRunLoop = this.createLoop('bandpass', 2400, 1.2);
     this.slideLoop = this.createLoop('lowpass', 900, 0.7);
     this.createSandevistanHum();
+    this.createChargeHum();
   }
 
   // ---------------------------------------------------------------------------
@@ -101,6 +103,32 @@ export class AudioSynthesizer {
   stopLoops(): void {
     this.setWallRunning(false);
     this.setSliding(false);
+    this.setCharge(0);
+  }
+
+  /** Bourdonnement montant pendant la charge de l'attaque (0 = silence). */
+  setCharge(level: number): void {
+    const h = this.chargeHum;
+    if (!h || !this.ctx) return;
+    const q = Math.round(level * 50) / 50;
+    if (q === h.level) return;
+    h.level = q;
+    const t = this.ctx.currentTime;
+    h.gain.gain.setTargetAtTime(q > 0 ? 0.02 + q * 0.05 : 0, t, 0.05);
+    h.osc.frequency.setTargetAtTime(110 + q * 520, t, 0.05);
+    h.sub.frequency.setTargetAtTime(55 + q * 260, t, 0.05);
+  }
+
+  playChargeReady(): void {
+    this.tone({ type: 'sine', from: 1320, to: 1320, duration: 0.12, volume: 0.08, raw: true });
+    this.tone({ type: 'sine', from: 1980, to: 1980, duration: 0.18, volume: 0.07, delay: 0.07, raw: true });
+    this.tone({ type: 'triangle', from: 2640, to: 2640, duration: 0.25, volume: 0.05, delay: 0.14, raw: true });
+  }
+
+  playChargedStrike(): void {
+    this.noise({ duration: 0.45, volume: 0.55, type: 'bandpass', from: 300, to: 5200, q: 0.8 });
+    this.tone({ type: 'sawtooth', from: 90, to: 900, duration: 0.35, volume: 0.12 });
+    this.tone({ type: 'sine', from: 70, to: 35, duration: 0.5, volume: 0.35, delay: 0.05 });
   }
 
   // ---------------------------------------------------------------------------
@@ -224,6 +252,11 @@ export class AudioSynthesizer {
       this.tone({ type: 'sawtooth', from: 90, to: 1400, duration: 0.4, volume: 0.1, raw: true });
       this.tone({ type: 'sine', from: 60, to: 700, duration: 0.45, volume: 0.18, raw: true });
     }
+  }
+
+  /** Petit bip d'interface (navigation du tutoriel). */
+  playUiBlip(): void {
+    this.tone({ type: 'square', from: 880, to: 1320, duration: 0.05, volume: 0.035, raw: true });
   }
 
   playDenied(): void {
@@ -381,6 +414,28 @@ export class AudioSynthesizer {
     osc.start();
     lfo.start();
     this.sandevistanHum = { gain, osc };
+  }
+
+  private createChargeHum(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 110;
+    const sub = ctx.createOscillator();
+    sub.type = 'square';
+    sub.frequency.value = 55;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 1800;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    osc.connect(filter);
+    sub.connect(filter);
+    filter.connect(gain).connect(this.sfx);
+    osc.start();
+    sub.start();
+    this.chargeHum = { gain, osc, sub, level: 0 };
   }
 
   private startAmbience(): void {

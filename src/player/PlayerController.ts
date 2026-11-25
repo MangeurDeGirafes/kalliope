@@ -80,6 +80,12 @@ export class PlayerController {
   private moveScale = 0;
   private lungeTimer = 0;
   private readonly lungeVelocity = new THREE.Vector3();
+  // Dash de l'attaque chargée (ne consomme pas de charge de dash)
+  private chargeDashTimer = 0;
+  private chargeDashSpeed = 0;
+  private chargeDashHasTarget = false;
+  private readonly chargeDashTarget = new THREE.Vector3();
+  private readonly chargeDashDir = new THREE.Vector3();
   private invulnerable = 0;
   private regenTimer = 0;
 
@@ -124,6 +130,11 @@ export class PlayerController {
 
   get feetY(): number {
     return this.position.y - (this.halfHeight + PLAYER.radius);
+  }
+
+  /** Vrai pendant le dash de l'attaque chargée. */
+  get isChargeDashing(): boolean {
+    return this.chargeDashTimer > 0;
   }
 
   get horizontalSpeed(): number {
@@ -185,6 +196,7 @@ export class PlayerController {
     this.lastWallNormal.set(0, 0, 0);
     this.mantleCooldown = 0;
     this.lungeTimer = 0;
+    this.chargeDashTimer = 0;
     this.airTime = 0;
     this.invulnerable = 0;
     this.regenTimer = 0;
@@ -206,6 +218,7 @@ export class PlayerController {
     if (this.dashing) this.endDash();
     if (this.wallRunning) this.endWallRun(false);
     this.lungeTimer = 0;
+    this.chargeDashTimer = 0;
     this.sliding = false;
     if (this.crouched && this.canStand()) this.setCrouched(false);
     this.velocity.y = verticalSpeed;
@@ -251,6 +264,62 @@ export class PlayerController {
     this.fovKick = Math.max(this.fovKick, 10);
   }
 
+  /**
+   * Dash de l'attaque chargée : fonce sur `target` (suivie à chaque frame via
+   * `setChargeDashTarget`) ou, sans cible, droit devant. Invulnérable pendant le dash.
+   */
+  startChargeDash(target: THREE.Vector3 | null, speed: number, maxDuration: number, noTargetDistance: number): void {
+    if (!this.alive) return;
+    if (this.dashing) this.endDash();
+    if (this.wallRunning) this.endWallRun(false);
+    this.lungeTimer = 0;
+    this.sliding = false;
+    if (this.crouched && this.canStand()) this.setCrouched(false);
+    this.chargeDashSpeed = speed;
+    if (target) {
+      this.chargeDashHasTarget = true;
+      this.chargeDashTarget.copy(target);
+      this.chargeDashTimer = maxDuration;
+    } else {
+      this.chargeDashHasTarget = false;
+      this.chargeDashDir.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      this.chargeDashTimer = noTargetDistance / speed;
+    }
+    this.justJumpedTimer = 0.1;
+    this.fovKick = Math.max(this.fovKick, 18);
+    this.addShake(0.25);
+  }
+
+  setChargeDashTarget(target: THREE.Vector3): void {
+    if (this.chargeDashHasTarget) this.chargeDashTarget.copy(target);
+  }
+
+  endChargeDash(): void {
+    if (this.chargeDashTimer <= 0) return;
+    this.chargeDashTimer = 0;
+    this.velocity.x *= 0.3;
+    this.velocity.z *= 0.3;
+    this.velocity.y = Math.min(this.velocity.y * 0.3, 3);
+  }
+
+  private updateChargeDash(dt: number): void {
+    this.chargeDashTimer -= dt;
+    this.invulnerable = Math.max(this.invulnerable, 0.15);
+    if (this.chargeDashHasTarget) {
+      const dir = this.tmp.subVectors(this.chargeDashTarget, this.position);
+      const dist = dir.length();
+      if (dist < 1.4) {
+        this.endChargeDash();
+        return;
+      }
+      dir.divideScalar(dist);
+      this.velocity.set(dir.x * this.chargeDashSpeed, THREE.MathUtils.clamp(dir.y * this.chargeDashSpeed, -25, 25), dir.z * this.chargeDashSpeed);
+    } else {
+      this.velocity.copy(this.chargeDashDir).multiplyScalar(this.chargeDashSpeed);
+    }
+    if (this.chargeDashTimer <= 0) this.endChargeDash();
+  }
+
   addRecoil(amount: number): void {
     this.recoil += amount;
   }
@@ -285,6 +354,7 @@ export class PlayerController {
     this.health = 0;
     this.slideHeld = false;
     this.lungeTimer = 0;
+    this.chargeDashTimer = 0;
     this.dashing = false;
     if (this.wallRunning) this.endWallRun(false);
     this.sliding = false;
@@ -316,6 +386,18 @@ export class PlayerController {
       this.pitch -= mouse.y * CAMERA.sensitivity;
       this.pitch = THREE.MathUtils.clamp(this.pitch, -CAMERA.pitchLimit, CAMERA.pitchLimit);
     }
+    // Pendant le dash chargé, la caméra se tourne vers la cible.
+    if (this.chargeDashTimer > 0 && this.chargeDashHasTarget) {
+      const cam = this.camera.position;
+      const dx = this.chargeDashTarget.x - cam.x;
+      const dy = this.chargeDashTarget.y - cam.y;
+      const dz = this.chargeDashTarget.z - cam.z;
+      const k = 1 - Math.exp(-12 * realDt);
+      let dyaw = Math.atan2(-dx, -dz) - this.yaw;
+      dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+      this.yaw += dyaw * k;
+      this.pitch += (Math.atan2(dy, Math.hypot(dx, dz)) - this.pitch) * k;
+    }
 
     this.updateSandevistan(realDt, controlsEnabled && input.wasMousePressed(MouseButton.Right));
 
@@ -342,7 +424,9 @@ export class PlayerController {
 
     if (dashPressed) this.tryDash(hasWish);
 
-    if (this.lungeTimer > 0) {
+    if (this.chargeDashTimer > 0) {
+      this.updateChargeDash(dt);
+    } else if (this.lungeTimer > 0) {
       this.lungeTimer -= dt;
       this.velocity.copy(this.lungeVelocity);
       if (this.lungeTimer <= 0) {
@@ -373,7 +457,7 @@ export class PlayerController {
     }
 
     // Gravité
-    if (!this.dashing && this.lungeTimer <= 0 && !this.grounded) {
+    if (!this.dashing && this.lungeTimer <= 0 && this.chargeDashTimer <= 0 && !this.grounded) {
       let g: number = MOVEMENT.gravity;
       if (this.wallRunning) {
         const k = Math.min(1, this.wallRunTimer / WALLRUN.maxDuration);
@@ -536,6 +620,7 @@ export class PlayerController {
   // --- Sauts ----------------------------------------------------------------
 
   private handleJumpPress(hasWish: boolean): void {
+    if (this.chargeDashTimer > 0) return;
     if (this.dashing) this.endDash();
     if (this.wallRunning) {
       this.wallJump();
@@ -585,7 +670,7 @@ export class PlayerController {
   // --- Dash -----------------------------------------------------------------
 
   private tryDash(hasWish: boolean): void {
-    if (this.dashing || this.lungeTimer > 0) return;
+    if (this.dashing || this.lungeTimer > 0 || this.chargeDashTimer > 0) return;
     if (DASH.airOnly && this.grounded) return;
     if (this.dashCharges <= 0) {
       this.audio.playDenied();
@@ -891,7 +976,7 @@ export class PlayerController {
 
     // Balancement de tête + bruits de pas
     const hSpeed = this.horizontalSpeed;
-    const bobbing = this.alive && this.grounded && !this.sliding && !this.dashing && hSpeed > 1;
+    const bobbing = this.alive && this.grounded && !this.sliding && !this.dashing && this.chargeDashTimer <= 0 && hSpeed > 1;
     this.bobWeight += ((bobbing ? 1 : 0) - this.bobWeight) * smooth(10, dt);
     if (bobbing) {
       const before = Math.floor(this.bobPhase / Math.PI);

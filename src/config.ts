@@ -136,6 +136,26 @@ export const BLADES = {
   trailLife: 0.16,
 } as const;
 
+/** Attaque chargée des lames : maintenir l'attaque puis relâcher. */
+export const CHARGED = {
+  /** Durée de maintien pour charger complètement (s, temps réel). */
+  holdTime: 1.5,
+  /** La jauge apparaît après ce délai : un simple clic reste un coup normal. */
+  showAfter: 0.25,
+  /** Portée de recherche de l'ennemi le plus proche (m). */
+  range: 32,
+  /** Vitesse du dash chargé (m/s). */
+  speed: 42,
+  maxDuration: 1.1,
+  /** Distance à laquelle la cible est tranchée. */
+  arriveDistance: 2.2,
+  /** Sans cible à portée : dash vers l'avant sur cette distance (m). */
+  noTargetDistance: 12,
+  /** Rayon de la frappe circulaire à l'arrivée. */
+  sweepRange: 4.5,
+  hitstop: 0.14,
+} as const;
+
 export const PISTOL = {
   fireInterval: 0.15,
   range: 220,

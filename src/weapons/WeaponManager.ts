@@ -5,14 +5,15 @@ import type { InputManager } from '../core/InputManager';
 import { MouseButton } from '../core/InputManager';
 import type { AudioSynthesizer } from '../core/AudioSynthesizer';
 import type { ParticleSystem } from '../effects/ParticleSystem';
-import type { EnemyManager } from '../enemies/EnemyManager';
+import type { Enemy, EnemyManager } from '../enemies/EnemyManager';
 import type { PlayerController } from '../player/PlayerController';
 import { Beam } from '../effects/Beam';
 import { BladeTrail } from '../effects/BladeTrail';
 import { createRadialTexture } from '../effects/ParticleSystem';
 import { MantisArm, armPose, createArmPose, lerpArmPose, mirrorArmPose } from './MantisBladeModel';
 import type { ArmPose } from './MantisBladeModel';
-import { BLADES, LIGHTING, PISTOL, TOUCH } from '../config';
+import { BLADES, CHARGED, LIGHTING, PISTOL, TOUCH } from '../config';
+import { vibrate } from '../core/Device';
 
 export type WeaponId = 'blades' | 'pistol';
 
@@ -67,6 +68,8 @@ export class WeaponManager {
   onWeaponChange: ((id: WeaponId) => void) | null = null;
   /** Mode tactile : assistance de visée renforcée. */
   touchMode = false;
+  /** Appelé quand l'attaque chargée frappe (hitstop, tremblement…). */
+  onChargedStrike: (() => void) | null = null;
 
   private readonly engine: Engine;
   private readonly physics: Physics;
@@ -100,6 +103,13 @@ export class WeaponManager {
   private lastSlashT = 0;
   /** Progression du déploiement des lames (0 = repliées, 1 = sorties). */
   private deploy = 1;
+  /** Coup demandé pendant le temps de récupération (mémorisé brièvement). */
+  private slashBuffer = 0;
+  /** Durée de maintien de l'attaque (s) ; -1 = pas de maintien en cours. */
+  private chargeHold = -1;
+  private chargeReadyPlayed = false;
+  private chargeStriking = false;
+  private chargeTarget: Enemy | null = null;
   private fireCooldown = 0;
   private kick = 0;
   private flashTimer = 0;
@@ -184,8 +194,27 @@ export class WeaponManager {
     this.lastYaw = this.player.yaw;
     this.lastPitch = this.player.pitch;
     this.deploy = 0;
+    this.slashBuffer = 0;
+    this.chargeHold = -1;
+    this.chargeStriking = false;
+    this.chargeTarget = null;
+    this.audio.setCharge(0);
     for (const arm of this.arms) arm.model.apply(arm.folded);
     if (this.current === 'blades') this.audio.playBladeDeploy();
+  }
+
+  /** Niveau de charge de l'attaque (0 → 1). */
+  get chargeLevel(): number {
+    return this.chargeHold < 0 ? 0 : Math.min(1, this.chargeHold / CHARGED.holdTime);
+  }
+
+  /** La jauge de charge est affichée (maintien au-delà d'un simple clic). */
+  get chargeVisible(): boolean {
+    return this.chargeHold >= CHARGED.showAfter && this.current === 'blades';
+  }
+
+  get isChargeStriking(): boolean {
+    return this.chargeStriking;
   }
 
   get isSwitching(): boolean {
@@ -204,17 +233,16 @@ export class WeaponManager {
       if (wheel !== 0) this.requestSwitch(this.current === 'blades' ? 'pistol' : 'blades');
 
       if (this.switchTimer <= 0) {
-        if (this.current === 'blades') {
-          if ((input.wasMousePressed(MouseButton.Left) || input.isMouseDown(MouseButton.Left)) && this.slashCooldown <= 0) {
-            this.startSlash();
-          }
-        } else if (input.isMouseDown(MouseButton.Left) && this.fireCooldown <= 0) {
-          this.fire();
-        }
+        if (this.current === 'blades') this.updateBladeInput(input, realDt);
+        else if (input.isMouseDown(MouseButton.Left) && this.fireCooldown <= 0) this.fire();
       }
     } else {
       input.consumeWheel();
+      this.cancelCharge();
     }
+    if (this.current !== 'blades' || this.switchTimer > 0) this.cancelCharge();
+    this.audio.setCharge(this.chargeVisible ? this.chargeLevel : 0);
+    this.updateChargedStrike();
 
     this.updateSwitch(dt);
     this.updateSway(dt, realDt);
@@ -230,6 +258,7 @@ export class WeaponManager {
 
   private requestSwitch(id: WeaponId): void {
     if (id === this.current && this.switchTimer <= 0) return;
+    if (this.chargeStriking) return;
     if (this.pendingWeapon === id) return;
     this.pendingWeapon = id;
     this.switchTimer = SWITCH_TIME;
@@ -308,7 +337,109 @@ export class WeaponManager {
   // Mantis Blades
   // ---------------------------------------------------------------------------
 
-  private startSlash(): void {
+  // ---------------------------------------------------------------------------
+  // Attaque : clic = coup immédiat, maintien 1,5 s puis relâche = attaque chargée
+  // ---------------------------------------------------------------------------
+
+  private updateBladeInput(input: InputManager, realDt: number): void {
+    this.slashBuffer = Math.max(0, this.slashBuffer - realDt);
+    if (input.wasMousePressed(MouseButton.Left)) {
+      this.slashBuffer = 0.2;
+      this.chargeHold = 0;
+      this.chargeReadyPlayed = false;
+    }
+    if (this.slashBuffer > 0 && this.slashCooldown <= 0 && !this.chargeStriking) {
+      this.slashBuffer = 0;
+      this.startSlash();
+    }
+    if (this.chargeHold < 0) return;
+    if (input.isMouseDown(MouseButton.Left)) {
+      // Temps réel : la charge dure 1,5 s même pendant le Sandevistan
+      this.chargeHold += realDt;
+      if (this.chargeHold >= CHARGED.holdTime && !this.chargeReadyPlayed) {
+        this.chargeReadyPlayed = true;
+        this.audio.playChargeReady();
+        vibrate(30);
+      }
+    } else {
+      const ready = this.chargeHold >= CHARGED.holdTime;
+      this.chargeHold = -1;
+      if (ready && !this.chargeStriking) this.releaseChargedAttack();
+    }
+  }
+
+  private cancelCharge(): void {
+    this.chargeHold = -1;
+    this.slashBuffer = 0;
+  }
+
+  /** Relâchement d'une charge complète : dash gratuit vers l'ennemi le plus proche. */
+  private releaseChargedAttack(): void {
+    const eye = this.engine.camera.position;
+    this.chargeTarget = this.enemies.findNearestEnemy(eye, CHARGED.range);
+    this.player.startChargeDash(this.chargeTarget ? this.chargeTarget.center : null, CHARGED.speed, CHARGED.maxDuration, CHARGED.noTargetDistance);
+    this.chargeStriking = true;
+    this.audio.playChargedStrike();
+    vibrate(40);
+  }
+
+  private updateChargedStrike(): void {
+    if (!this.chargeStriking) return;
+    const target = this.chargeTarget;
+    if (target && target.alive) this.player.setChargeDashTarget(target.center);
+    // Traînée d'énergie derrière le joueur
+    this.particles.burst(this.player.position, {
+      count: 6,
+      color: 0xff2bd6,
+      color2: 0x00e5ff,
+      intensity: 3,
+      speedMin: 0.5,
+      speedMax: 2,
+      lifeMin: 0.2,
+      lifeMax: 0.45,
+      sizeMin: 0.05,
+      sizeMax: 0.12,
+      gravity: 0,
+      drag: 3,
+    });
+    const eye = this.engine.camera.position;
+    const reached = target !== null && target.alive && eye.distanceTo(target.center) < CHARGED.arriveDistance;
+    if (reached || !this.player.isChargeDashing) this.finishChargedAttack();
+  }
+
+  private finishChargedAttack(): void {
+    this.chargeStriking = false;
+    this.player.endChargeDash();
+    const eye = this.engine.camera.position;
+    const forward = this.player.getLookDirection(this.tmp2);
+    const target = this.chargeTarget;
+    this.chargeTarget = null;
+    if (target && target.alive && eye.distanceTo(target.center) < CHARGED.arriveDistance + 2) this.enemies.kill(target, forward);
+    // Frappe circulaire : tout ce qui est autour est tranché, les projectiles renvoyés
+    this.enemies.meleeSweep(eye, forward, CHARGED.sweepRange, -1);
+    this.enemies.deflectProjectiles(eye, forward, CHARGED.sweepRange, -1);
+    this.beginSlashAnimation();
+    this.particles.burst(eye.clone().addScaledVector(forward, 1.2), {
+      count: 70,
+      color: 0xff2bd6,
+      color2: 0x00e5ff,
+      intensity: 4,
+      speedMin: 6,
+      speedMax: 16,
+      lifeMin: 0.25,
+      lifeMax: 0.55,
+      sizeMin: 0.04,
+      sizeMax: 0.1,
+      gravity: 2,
+      drag: 3,
+    });
+    this.audio.playBladeHit();
+    vibrate(60);
+    this.onChargedStrike?.();
+  }
+
+  /** Lance l'animation de coup (bras alterné, traînée, son). */
+  private beginSlashAnimation(): void {
     this.slashArm = 1 - this.slashArm;
     this.slashTime = 0;
     this.lastSlashT = 0;
@@ -316,6 +447,10 @@ export class WeaponManager {
     const arm = this.arms[this.slashArm];
     this.trail.setColor(arm.side === 1 ? CYAN : MAGENTA);
     this.audio.playSlash();
+  }
+
+  private startSlash(): void {
+    this.beginSlashAnimation();
 
     // Propulsion : bond vers une cible proche, sinon légère poussée vers l'avant.
     const eye = this.engine.camera.position;
@@ -341,6 +476,15 @@ export class WeaponManager {
   private idlePose(arm: BladeArm, index: number, out: ArmPose): ArmPose {
     const k = this.deploy >= 1 ? 1 : easeOutBack(this.deploy);
     lerpArmPose(arm.folded, arm.rest, k, out);
+    // Charge : la patte se replie, prête à frapper ; elle tremble une fois chargée
+    const charge = this.chargeStriking ? 1 : this.chargeVisible ? this.chargeLevel : 0;
+    if (charge > 0) {
+      lerpArmPose(out, arm.windup, charge * 0.75, out);
+      if (charge >= 1) {
+        out.p.x += (Math.random() - 0.5) * 0.006;
+        out.p.y += (Math.random() - 0.5) * 0.006;
+      }
+    }
     // Respiration + micro-mouvements mécaniques de la patte
     out.p.y += Math.sin(this.time * 2 + index) * 0.006;
     out.femur += Math.sin(this.time * 0.9 + index * 2) * 0.015;
@@ -350,7 +494,8 @@ export class WeaponManager {
 
   private updateBlades(dt: number): void {
     this.deploy = Math.min(1, this.deploy + dt / DEPLOY_TIME);
-    const pulse = 0.5 + Math.sin(this.time * 6) * 0.5;
+    const charge = this.chargeStriking ? 1 : this.chargeVisible ? this.chargeLevel : 0;
+    const pulse = 0.5 + Math.sin(this.time * (6 + charge * 18)) * 0.5 + charge * 2.2;
     for (const arm of this.arms) arm.model.setPulse(pulse);
 
     for (let i = 0; i < this.arms.length; i++) {

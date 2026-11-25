@@ -933,3 +933,351 @@ body.touch-mode {
 .tb-restart {
   right: calc(env(safe-area-inset-right) + 66px);
 }
+
+/* ------------------------------------------------------ Attaque chargée */
+
+.charge-ring {
+  --charge: 0;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.12s, transform 0.12s;
+  background: conic-gradient(var(--magenta) calc(var(--charge) * 1%), rgba(232, 246, 255, 0.14) 0);
+  -webkit-mask: radial-gradient(circle, transparent 25px, #000 26px, #000 30px, transparent 31px);
+  mask: radial-gradient(circle, transparent 25px, #000 26px, #000 30px, transparent 31px);
+}
+.charge-ring.show {
+  opacity: 1;
+  transform: scale(1);
+}
+.charge-ring.ready {
+  background: conic-gradient(var(--cyan) 100%, transparent 0);
+  animation: charge-pulse 0.3s infinite alternate;
+}
+.charge-label {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 40px);
+  transform: translateX(-50%);
+  display: none;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+  text-shadow: 0 0 8px var(--cyan), 0 0 16px var(--magenta);
+  animation: blink 0.3s infinite alternate;
+}
+.charge-label.show {
+  display: block;
+}
+@keyframes charge-pulse {
+  from {
+    transform: scale(1);
+    filter: drop-shadow(0 0 4px var(--cyan));
+  }
+  to {
+    transform: scale(1.12);
+    filter: drop-shadow(0 0 10px var(--magenta));
+  }
+}
+
+/* ------------------------------------------------------------- Tutoriel */
+
+.tutorial {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, rgba(14, 6, 30, 0.82), rgba(3, 1, 8, 0.96));
+  touch-action: pan-y;
+}
+.tutorial.show {
+  display: flex;
+}
+
+.tut-panel {
+  width: min(980px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 22px;
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  background: #08061a;
+  box-shadow: 0 0 40px rgba(255, 43, 214, 0.15), inset 0 0 30px rgba(0, 229, 255, 0.08);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+}
+/* L'écran titre est masqué tant que le tutoriel est ouvert ; le tutoriel se lit aussi en portrait */
+.tutorial-open .overlay {
+  visibility: hidden;
+}
+body.tutorial-open .rotate-hint {
+  display: none !important;
+}
+
+.tut-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--font-display);
+  letter-spacing: 0.3em;
+  font-size: 12px;
+}
+.tut-kind {
+  color: var(--magenta);
+  text-shadow: 0 0 8px var(--magenta);
+}
+.tut-step {
+  color: rgba(232, 246, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+.tut-skip {
+  margin-left: auto;
+}
+
+.tut-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+}
+
+.tut-screen {
+  position: relative;
+  border: 2px solid rgba(0, 229, 255, 0.5);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.25);
+  background: #07050f;
+  line-height: 0;
+}
+.tut-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px);
+}
+.tut-canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.tut-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tut-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(20px, 3.2vw, 32px);
+  letter-spacing: 0.08em;
+  text-wrap: balance;
+  color: #fff;
+  text-shadow: 0 0 12px var(--magenta), 2px 0 0 rgba(0, 229, 255, 0.7);
+}
+.tut-desc {
+  font-size: 18px;
+  line-height: 1.45;
+  color: rgba(232, 246, 255, 0.9);
+  max-width: 46ch;
+}
+.tutorial.lore .tut-desc {
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 0.05em;
+  min-height: 6em;
+  color: var(--cyan);
+}
+.tutorial.lore .tut-desc::after {
+  content: '▌';
+  animation: blink 0.5s infinite alternate;
+}
+.tut-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tutorial.lore .tut-keys {
+  display: none;
+}
+
+.tut-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.tut-dots {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tut-dot {
+  width: 18px;
+  height: 6px;
+  padding: 0;
+  border: 1px solid rgba(0, 229, 255, 0.5);
+  background: transparent;
+  transform: skewX(-20deg);
+  cursor: pointer;
+}
+.tut-dot.active {
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+}
+
+.tut-prev,
+.tut-next,
+.tut-skip {
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  padding: 10px 16px;
+  color: var(--cyan);
+  background: rgba(0, 30, 40, 0.5);
+  border: 1px solid rgba(0, 229, 255, 0.6);
+  cursor: pointer;
+}
+.tut-skip {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: rgba(232, 246, 255, 0.7);
+  border-color: rgba(232, 246, 255, 0.3);
+  background: transparent;
+}
+.tut-prev:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.tut-next.play {
+  color: #fff;
+  border-color: var(--magenta);
+  background: rgba(255, 43, 214, 0.25);
+  box-shadow: 0 0 16px rgba(255, 43, 214, 0.5);
+  animation: blink 0.8s infinite alternate;
+}
+.tut-prev:focus-visible,
+.tut-next:focus-visible,
+.tut-skip:focus-visible,
+.tut-dot:focus-visible,
+.overlay-btn:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+/* Apparition de chaque page */
+.tut-panel.enter .tut-screen {
+  animation: tut-glitch 0.35s steps(4);
+}
+.tut-panel.enter .tut-title {
+  animation: tut-rise 0.4s ease-out both;
+}
+.tut-panel.enter .tut-desc {
+  animation: tut-rise 0.45s 0.08s ease-out both;
+}
+.tut-panel.enter .tut-keys {
+  animation: tut-rise 0.45s 0.16s ease-out both;
+}
+@keyframes tut-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes tut-glitch {
+  0% {
+    filter: hue-rotate(90deg) saturate(2);
+    transform: translateX(-3px);
+  }
+  50% {
+    filter: hue-rotate(-60deg);
+    transform: translateX(2px);
+  }
+  100% {
+    filter: none;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tut-panel.enter .tut-screen,
+  .tut-panel.enter .tut-title,
+  .tut-panel.enter .tut-desc,
+  .tut-panel.enter .tut-keys,
+  .tut-next.play {
+    animation: none;
+  }
+}
+
+/* Écrans étroits : image au-dessus du texte */
+@media (max-width: 720px) and (orientation: portrait) {
+  .tut-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Téléphones en paysage : tout tient sans défiler */
+@media (max-height: 480px) {
+  .tut-panel {
+    gap: 8px;
+    padding: 10px 14px;
+  }
+  .tut-body {
+    gap: 14px;
+  }
+  .tut-title {
+    font-size: 20px;
+  }
+  .tut-desc {
+    font-size: 14px;
+    line-height: 1.35;
+  }
+  .tut-prev,
+  .tut-next {
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+}
+
+/* Navigation du tutoriel sur écran étroit : points au-dessus, boutons côte à côte */
+.tut-prev,
+.tut-next {
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .tut-nav {
+    flex-wrap: wrap;
+  }
+  .tut-dots {
+    order: -1;
+    flex-basis: 100%;
+    margin-bottom: 4px;
+  }
+  .tut-prev,
+  .tut-next {
+    flex: 1;
+    padding: 12px 8px;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+  }
+}

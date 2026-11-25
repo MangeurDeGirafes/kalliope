@@ -204,6 +204,23 @@ export class EnemyManager {
     return best ? best.center.clone() : null;
   }
 
+  /** Ennemi vivant le plus proche, en ligne de vue, dans la portée donnée. */
+  findNearestEnemy(origin: THREE.Vector3, range: number): Enemy | null {
+    let best: Enemy | null = null;
+    let bestDist = range;
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const dist = e.center.distanceTo(origin);
+      if (dist >= bestDist || dist < 0.01) continue;
+      this.tmp.subVectors(e.center, origin).divideScalar(dist);
+      const hit = this.physics.raycast(origin, this.tmp, dist);
+      if (hit && hit.distance < dist - 0.8) continue;
+      best = e;
+      bestDist = dist;
+    }
+    return best;
+  }
+
   /** Raycast contre les zones de touche des ennemis. */
   raycast(origin: THREE.Vector3, dir: THREE.Vector3, maxDistance: number, assistRadius = 0): EnemyRayHit | null {
     this.ray.set(origin, dir);

@@ -41,12 +41,17 @@ export class HUD {
   onOverlayClick: (() => void) | null = null;
   /** Appelé par le bouton « Recommencer » de l'écran de pause. */
   onRestartClick: (() => void) | null = null;
+  /** Appelé par le bouton « Tutoriel » de l'écran titre. */
+  onTutorialClick: (() => void) | null = null;
 
   private readonly root: HTMLDivElement;
   private readonly timer: HTMLDivElement;
   private readonly targets: HTMLDivElement;
   private readonly crosshair: HTMLDivElement;
   private readonly hitmarker: HTMLDivElement;
+  private readonly chargeRing: HTMLDivElement;
+  private readonly chargeLabel: HTMLDivElement;
+  private lastCharge = -1;
   private readonly sandFill: HTMLDivElement;
   private readonly sandLabel: HTMLDivElement;
   private readonly dashPips: HTMLSpanElement[] = [];
@@ -74,6 +79,8 @@ export class HUD {
     this.crosshair = el('div', 'crosshair blades', this.root);
     for (let i = 0; i < 4; i++) el('span', `tick t${i}`, this.crosshair);
     el('span', 'dot', this.crosshair);
+    this.chargeRing = el('div', 'charge-ring', this.root);
+    this.chargeLabel = el('div', 'charge-label', this.root, 'RELÂCHE !');
     this.hitmarker = el('div', 'hitmarker', this.root);
     for (let i = 0; i < 4; i++) el('span', `hm h${i}`, this.hitmarker);
 
@@ -110,6 +117,11 @@ export class HUD {
       if (target?.closest('[data-act="restart"]')) {
         e.stopPropagation();
         this.onRestartClick?.();
+        return;
+      }
+      if (target?.closest('[data-act="tutorial"]')) {
+        e.stopPropagation();
+        this.onTutorialClick?.();
         return;
       }
       this.onOverlayClick?.();
@@ -154,6 +166,19 @@ export class HUD {
     this.healthPips.forEach((p, i) => p.classList.toggle('full', i < s.health));
     this.root.classList.toggle('critical', s.health <= 1);
     this.speed.textContent = `${Math.round(s.speed * 3.6)} KM/H`;
+  }
+
+  /** Jauge circulaire de l'attaque chargée autour du réticule. */
+  setCharge(level: number, visible: boolean): void {
+    const ready = visible && level >= 1;
+    const q = visible ? Math.min(99, Math.floor(level * 100)) : -1;
+    const key = ready ? 1000 : q;
+    if (key === this.lastCharge) return;
+    this.lastCharge = key;
+    this.chargeRing.classList.toggle('show', visible);
+    this.chargeRing.classList.toggle('ready', ready);
+    this.chargeLabel.classList.toggle('show', ready);
+    this.chargeRing.style.setProperty('--charge', String(ready ? 100 : Math.max(0, q)));
   }
 
   hitMarker(): void {
@@ -212,6 +237,7 @@ export class HUD {
         <div class="objective">Rejoins la balise d'extraction dorée au bout des toits. Élimine les gardes et drones en un coup.</div>
         ${best !== null ? `<div class="best">RECORD : ${HUD.formatTime(best)}</div>` : ''}
         <div class="cta">${this.touch ? '[ TOUCHE POUR TE CONNECTER ]' : '[ CLIQUE POUR TE CONNECTER ]'}</div>
+        <button class="overlay-btn" data-act="tutorial" type="button">▶ REVOIR LE TUTORIEL</button>
         ${this.touch ? '<div class="sub">Plein écran et mode paysage recommandés</div>' : ''}
       </div>`;
   }

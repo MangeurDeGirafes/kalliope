@@ -11,12 +11,14 @@ import { LevelBuilder } from './world/LevelBuilder';
 import type { LevelData } from './world/LevelBuilder';
 import { HUD } from './ui/HUD';
 import { TouchControls } from './ui/TouchControls';
+import { Tutorial } from './ui/Tutorial';
 import { IS_TOUCH, vibrate } from './core/Device';
-import { COMBAT, DASH, PLAYER, SANDEVISTAN, TOUCH } from './config';
+import { CHARGED, COMBAT, DASH, PLAYER, SANDEVISTAN, TOUCH } from './config';
 
 type GameState = 'menu' | 'playing' | 'paused' | 'dead' | 'finished';
 
 const BEST_TIME_KEY = 'neon-vertigo-best-time';
+const TUTORIAL_KEY = 'neon-vertigo-tutorial-seen';
 
 /** Orchestrateur : boucle principale, échelles de temps, règles de partie. */
 export class Game {
@@ -32,6 +34,7 @@ export class Game {
   private readonly weapons: WeaponManager;
   private readonly hud: HUD;
   private readonly touch: TouchControls | null;
+  private readonly tutorial: Tutorial;
 
   private state: GameState = 'menu';
   private lastTime = 0;
@@ -76,11 +79,15 @@ export class Game {
       this.touch = null;
     }
 
+    this.tutorial = new Tutorial(document.body, IS_TOUCH);
+
     this.wireEvents();
     this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
     this.weapons.reset();
     this.hud.showStart(this.loadBestTime());
     this.hud.setVisible(false);
+    // Premier lancement : le tutoriel s'ouvre tout seul
+    if (!this.readFlag(TUTORIAL_KEY)) this.tutorial.open();
   }
 
   start(): void {
@@ -105,6 +112,19 @@ export class Game {
       if (this.state !== 'paused') this.restart();
       else if (this.input.usesFreeMouse) this.resume();
     };
+    this.tutorial.onInteract = () => {
+      this.audio.init();
+      this.audio.playUiBlip();
+    };
+    this.tutorial.onClose = (play) => {
+      this.writeFlag(TUTORIAL_KEY);
+      if (play && this.state === 'menu') this.startGame();
+    };
+    this.hud.onTutorialClick = () => {
+      this.audio.init();
+      this.tutorial.open();
+    };
+
     this.hud.onRestartClick = () => {
       this.audio.init();
       if (!this.touch) this.input.requestPointerLock();
@@ -137,6 +157,10 @@ export class Game {
     this.input.onEscape = () => this.pause();
 
     this.weapons.onWeaponChange = (id) => this.hud.setWeapon(id);
+    this.weapons.onChargedStrike = () => {
+      this.hitstop = Math.max(this.hitstop, CHARGED.hitstop);
+      this.player.addShake(0.5);
+    };
 
     this.enemies.onKill = () => {
       this.kills++;
@@ -309,6 +333,7 @@ export class Game {
       maxHealth: PLAYER.maxHealth,
       speed: this.player.horizontalSpeed,
     });
+    this.hud.setCharge(this.weapons.chargeLevel, this.weapons.chargeVisible || this.weapons.isChargeStriking);
     this.touch?.update({
       weapon: this.weapons.current,
       sandevistanActive: this.player.sandevistanActive,
@@ -471,6 +496,30 @@ export class Game {
       kills: this.kills,
       totalEnemies: this.enemies.totalCount,
     });
+  }
+
+  /** Lance la partie depuis l'écran titre (geste utilisateur requis). */
+  private startGame(): void {
+    this.audio.init();
+    if (this.touch) this.enterFullscreen();
+    else this.input.requestPointerLock();
+    this.restart();
+  }
+
+  private readFlag(key: string): boolean {
+    try {
+      return window.localStorage.getItem(key) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  private writeFlag(key: string): void {
+    try {
+      window.localStorage.setItem(key, '1');
+    } catch {
+      /* stockage indisponible : le tutoriel se rouvrira au prochain lancement */
+    }
   }
 
   private loadBestTime(): number | null {
