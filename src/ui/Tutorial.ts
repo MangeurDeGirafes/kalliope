@@ -73,7 +73,7 @@ function gamePages(touch: boolean): Page[] {
     ),
     page(
       'ATTAQUE CHARGÉE',
-      'Maintiens l\'attaque environ 1,5 seconde, puis relâche : tu fonces sur l\'ennemi le plus proche et tu le tranches. Ce dash ne consomme aucune charge et te rend invulnérable.',
+      `Maintiens l'attaque une demi-seconde, puis relâche : tu fonces sur l'ennemi le plus proche et tu le tranches. Ce dash ne consomme aucune charge et te rend invulnérable.`,
       keys(['MAINTENIR CLIC GAUCHE'], ['MAINTENIR ATTAQUE']),
       sceneCharged,
     ),

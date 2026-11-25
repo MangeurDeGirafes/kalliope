@@ -139,9 +139,9 @@ export const BLADES = {
 /** Attaque chargée des lames : maintenir l'attaque puis relâcher. */
 export const CHARGED = {
   /** Durée de maintien pour charger complètement (s, temps réel). */
-  holdTime: 1.5,
+  holdTime: 0.5,
   /** La jauge apparaît après ce délai : un simple clic reste un coup normal. */
-  showAfter: 0.25,
+  showAfter: 0.12,
   /** Portée de recherche de l'ennemi le plus proche (m). */
   range: 32,
   /** Vitesse du dash chargé (m/s). */

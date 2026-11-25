@@ -338,7 +338,7 @@ export class WeaponManager {
   // ---------------------------------------------------------------------------
 
   // ---------------------------------------------------------------------------
-  // Attaque : clic = coup immédiat, maintien 1,5 s puis relâche = attaque chargée
+  // Attaque : clic = coup immédiat, maintien (CHARGED.holdTime) puis relâche = attaque chargée
   // ---------------------------------------------------------------------------
 
   private updateBladeInput(input: InputManager, realDt: number): void {
@@ -354,7 +354,7 @@ export class WeaponManager {
     }
     if (this.chargeHold < 0) return;
     if (input.isMouseDown(MouseButton.Left)) {
-      // Temps réel : la charge dure 1,5 s même pendant le Sandevistan
+      // Temps réel : la durée de charge est la même pendant le Sandevistan
       this.chargeHold += realDt;
       if (this.chargeHold >= CHARGED.holdTime && !this.chargeReadyPlayed) {
         this.chargeReadyPlayed = true;

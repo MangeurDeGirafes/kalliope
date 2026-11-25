@@ -1,4 +1,5 @@
 import { drawPixelText, pixelTextWidth } from '../world/PixelTextures';
+import { CHARGED } from '../config';
 
 /**
  * Petites scènes animées en pixel art (160 × 90) qui illustrent chaque
@@ -523,16 +524,21 @@ export const sceneCombat: Scene = (ctx, t) => {
 
 /** Attaque chargée : maintenir, relâcher, foncer sur l'ennemi le plus proche. */
 export const sceneCharged: Scene = (ctx, t) => {
-  const tt = t % 5;
+  const tt = t % 4;
   sky(ctx);
   skyline(ctx, 120);
   roof(ctx, 0, 70, 160, C.cyan);
   const startX = 28;
   const gx = 134;
+  // Chronologie : temps de lecture, charge (durée réelle du jeu), prêt, dash, impact
+  const lead = 0.6;
+  const readyEnd = lead + CHARGED.holdTime + 0.7;
+  const dashEnd = readyEnd + 0.35;
   let x = startX;
-  let pose: Pose = 'charge';
-  const level = clamp01(tt / 1.5);
-  if (tt < 1.9) {
+  let pose: Pose = tt < lead ? 'stand' : 'charge';
+  const level = clamp01((tt - lead) / CHARGED.holdTime);
+  const holdLabel = `MAINTIENS L ATTAQUE ${String(CHARGED.holdTime).replace('.', ',')} S`;
+  if (tt < readyEnd) {
     // Anneau de charge autour du coureur
     const n = 28;
     for (let i = 0; i < n; i++) {
@@ -542,10 +548,10 @@ export const sceneCharged: Scene = (ctx, t) => {
     }
     px(ctx, 50, 80, 60, 3, 'rgba(255,255,255,0.15)');
     px(ctx, 50, 80, 60 * level, 3, level >= 1 ? C.cyan : C.magenta);
-    if (level < 1) centered(ctx, 'MAINTIENS L ATTAQUE 1,5 S', 6, C.white);
+    if (level < 1) centered(ctx, holdLabel, 6, C.white);
     else if (Math.floor(tt * 8) % 2 === 0) centered(ctx, 'RELACHE !', 6, C.cyan, 2);
-  } else if (tt < 2.25) {
-    const k = (tt - 1.9) / 0.35;
+  } else if (tt < dashEnd) {
+    const k = (tt - readyEnd) / (dashEnd - readyEnd);
     x = startX + (gx - 8 - startX) * k;
     pose = 'dash';
     for (let i = 1; i <= 4; i++) runner(ctx, x - i * 9, 70, 'dash', t, 0.5 - i * 0.1);
@@ -553,11 +559,11 @@ export const sceneCharged: Scene = (ctx, t) => {
     centered(ctx, 'DASH GRATUIT ET INVULNERABLE', 6, C.magenta);
   } else {
     x = gx - 8;
-    pose = tt < 2.6 ? 'slash' : 'stand';
-    burst(ctx, gx, 60, (tt - 2.25) / 0.9, [C.magenta, C.cyan, C.white, C.amber]);
+    pose = tt < dashEnd + 0.35 ? 'slash' : 'stand';
+    burst(ctx, gx, 60, (tt - dashEnd) / 0.9, [C.magenta, C.cyan, C.white, C.amber]);
     centered(ctx, 'CIBLE LA PLUS PROCHE', 6, C.white);
   }
-  if (tt < 2.25) guard(ctx, gx, 70, t);
+  if (tt < dashEnd) guard(ctx, gx, 70, t);
   runner(ctx, x, 70, pose, t);
   rain(ctx, t);
 };
