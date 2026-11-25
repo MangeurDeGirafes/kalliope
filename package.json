@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:web": "node scripts/build-web.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.187.0",

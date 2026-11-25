@@ -51,6 +51,9 @@ export class InputManager {
   private mouseDY = 0;
   private wheelSteps = 0;
   private locked = false;
+  private everLocked = false;
+  /** Repli quand le pointer lock est indisponible : la souris reste libre. */
+  private freeMouse = false;
   private touchMode = false;
   private readonly virtualDown = new Set<Action>();
   private readonly virtualPressed = new Set<Action>();
@@ -58,6 +61,10 @@ export class InputManager {
 
   /** Appelé quand le pointer lock change (true = verrouillé). */
   onPointerLockChange: ((locked: boolean) => void) | null = null;
+  /** Appelé quand le navigateur refuse le pointer lock (on passe en souris libre). */
+  onPointerLockUnavailable: (() => void) | null = null;
+  /** Appelé sur Échap en mode souris libre (sinon Échap libère déjà le pointer lock). */
+  onEscape: (() => void) | null = null;
 
   constructor(element: HTMLElement) {
     this.element = element;
@@ -71,6 +78,7 @@ export class InputManager {
     document.addEventListener('wheel', this.handleWheel, { passive: true });
     document.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', this.handlePointerLockChange);
+    document.addEventListener('pointerlockerror', () => this.enableFreeMouse());
     // Protection contre Ctrl+W (glissade + avancer) qui fermerait l'onglet en jeu.
     window.addEventListener('beforeunload', (e) => {
       if (this.locked) {
@@ -83,9 +91,13 @@ export class InputManager {
     return this.locked;
   }
 
-  /** Vrai quand les commandes de jeu peuvent être lues (souris capturée ou mode tactile). */
+  /** Vrai quand les commandes de jeu peuvent être lues (souris capturée, libre ou tactile). */
   get isActive(): boolean {
-    return this.locked || this.touchMode;
+    return this.locked || this.touchMode || this.freeMouse;
+  }
+
+  get usesFreeMouse(): boolean {
+    return this.freeMouse;
   }
 
   get isTouchMode(): boolean {
@@ -147,17 +159,28 @@ export class InputManager {
   }
 
   requestPointerLock(): void {
-    if (this.locked) return;
+    if (this.locked || this.freeMouse || this.touchMode) return;
     try {
-      const result = this.element.requestPointerLock() as unknown;
-      if (result instanceof Promise) {
-        result.catch(() => {
-          /* l'utilisateur a refusé ou le navigateur a bloqué : on réessaiera au prochain clic */
-        });
+      if (typeof this.element.requestPointerLock !== 'function') {
+        this.enableFreeMouse();
+        return;
       }
+      const result = this.element.requestPointerLock() as unknown;
+      if (result instanceof Promise) result.catch(() => this.enableFreeMouse());
     } catch {
-      /* navigateur sans pointer lock */
+      this.enableFreeMouse();
     }
+  }
+
+  /**
+   * Page intégrée sans pointer lock : on lit les mouvements de la souris libre.
+   * Après un premier verrouillage réussi, un refus est seulement temporaire
+   * (délai imposé par le navigateur après Échap) : on reste alors en pause.
+   */
+  private enableFreeMouse(): void {
+    if (this.freeMouse || this.touchMode || this.everLocked) return;
+    this.freeMouse = true;
+    this.onPointerLockUnavailable?.();
   }
 
   exitPointerLock(): void {
@@ -218,6 +241,7 @@ export class InputManager {
   }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
+    if (e.code === 'Escape' && this.freeMouse) this.onEscape?.();
     if (this.isGameKey(e.code)) e.preventDefault();
     if (e.repeat) return;
     if (!this.down.has(e.code)) this.pressed.add(e.code);
@@ -234,7 +258,7 @@ export class InputManager {
   };
 
   private handleMouseDown = (e: MouseEvent): void => {
-    if (!this.locked) return;
+    if (!this.locked && !this.freeMouse) return;
     this.mouseDown.add(e.button);
     this.mousePressed.add(e.button);
   };
@@ -245,18 +269,19 @@ export class InputManager {
   };
 
   private handleMouseMove = (e: MouseEvent): void => {
-    if (!this.locked) return;
+    if (!this.locked && !this.freeMouse) return;
     this.mouseDX += Math.max(-MAX_MOUSE_DELTA, Math.min(MAX_MOUSE_DELTA, e.movementX));
     this.mouseDY += Math.max(-MAX_MOUSE_DELTA, Math.min(MAX_MOUSE_DELTA, e.movementY));
   };
 
   private handleWheel = (e: WheelEvent): void => {
-    if (!this.locked || e.deltaY === 0) return;
+    if ((!this.locked && !this.freeMouse) || e.deltaY === 0) return;
     this.wheelSteps += Math.sign(e.deltaY);
   };
 
   private handlePointerLockChange = (): void => {
     this.locked = document.pointerLockElement === this.element;
+    if (this.locked) this.everLocked = true;
     if (!this.locked) {
       this.mouseDown.clear();
       this.mouseDX = 0;

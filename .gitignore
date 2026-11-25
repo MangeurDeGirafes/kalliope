@@ -97,3 +97,4 @@ site
 node_modules/
 dist-ssr/
 *.local
+dist-web/

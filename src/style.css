@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;800&family=Rajdhani:wght@500;700&display=swap');
 
 :root {
+  color-scheme: dark;
   --cyan: #00e5ff;
   --magenta: #ff2bd6;
   --yellow: #ffd23b;

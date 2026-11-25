@@ -103,6 +103,7 @@ export class Game {
       }
       this.input.requestPointerLock();
       if (this.state !== 'paused') this.restart();
+      else if (this.input.usesFreeMouse) this.resume();
     };
     this.hud.onRestartClick = () => {
       this.audio.init();
@@ -128,6 +129,12 @@ export class Game {
       if (!locked && this.state === 'playing') this.pause();
       else if (locked && this.state === 'paused') this.resume();
     };
+    // Page intégrée qui refuse le pointer lock : on joue en souris libre.
+    this.input.onPointerLockUnavailable = () => {
+      if (this.state === 'paused') this.resume();
+      this.hud.flashMessage('SOURIS LIBRE · ÉCHAP : PAUSE', '#ffd23b', 2200);
+    };
+    this.input.onEscape = () => this.pause();
 
     this.weapons.onWeaponChange = (id) => this.hud.setWeapon(id);
 
