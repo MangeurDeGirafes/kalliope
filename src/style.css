@@ -601,7 +601,7 @@ kbd {
 
 .level-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin: 12px 0 4px;
 }
@@ -665,9 +665,10 @@ kbd {
 }
 .lc-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 4px 6px;
   width: 100%;
   margin-top: 4px;
 }
@@ -817,7 +818,7 @@ body.touch-mode {
 }
 @media (min-width: 640px) {
   .touch-mode .level-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 @media (max-height: 430px) {
@@ -2148,6 +2149,32 @@ body.tutorial-open .rotate-hint {
   .overlay.start .quick-keys {
     margin-top: 8px;
   }
+  .overlay.start .level-card {
+    min-height: 0;
+    padding: 9px 10px 8px;
+  }
+  .overlay.start .lc-sub {
+    font-size: 11px;
+    line-height: 1.2;
+  }
+  .overlay.start .level-grid {
+    gap: 8px;
+    margin: 8px 0 2px;
+  }
+}
+/* Six cartes sur un écran étroit : noms plus serrés, sans l'étiquette « DERNIER » */
+@media (max-width: 760px) {
+  .overlay.start .lc-name {
+    font-size: 11px;
+    letter-spacing: 0.03em;
+  }
+  .overlay.start .level-card {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .overlay.start .level-card.selected::after {
+    display: none;
+  }
 }
 .touch-mode .overlay.start .btn-row .overlay-btn {
   margin-top: 6px;
@@ -2438,4 +2465,85 @@ body.tutorial-open .rotate-hint {
   font-family: var(--font-display);
   font-style: italic;
   font-size: 13px;
+}
+
+/* ------------------------------------------------------ Grappin */
+
+.grapple-mark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+  will-change: transform;
+}
+.grapple-mark.show {
+  opacity: 1;
+}
+.grapple-mark .gm-box {
+  position: absolute;
+  left: -15px;
+  top: -15px;
+  width: 30px;
+  height: 30px;
+  border: 2px solid #2bffd0;
+  transform: rotate(45deg);
+  box-shadow: 0 0 10px rgba(43, 255, 208, 0.8), inset 0 0 6px rgba(43, 255, 208, 0.5);
+  animation: grapple-spin 1.6s linear infinite;
+}
+.grapple-mark .gm-key {
+  position: absolute;
+  left: 14px;
+  top: 10px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  color: #05070c;
+  background: #2bffd0;
+  padding: 1px 5px;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(43, 255, 208, 0.8);
+}
+.grapple-mark.enemy .gm-box {
+  border-color: #ff3b5a;
+  box-shadow: 0 0 10px rgba(255, 59, 90, 0.85), inset 0 0 6px rgba(255, 59, 90, 0.5);
+}
+.grapple-mark.enemy .gm-key {
+  background: #ff3b5a;
+  box-shadow: 0 0 8px rgba(255, 59, 90, 0.8);
+}
+@keyframes grapple-spin {
+  from {
+    transform: rotate(45deg) scale(1);
+  }
+  50% {
+    transform: rotate(135deg) scale(0.82);
+  }
+  to {
+    transform: rotate(225deg) scale(1);
+  }
+}
+
+.tb-grapple {
+  --size: 104px;
+  display: none;
+  left: min(calc(50% - var(--u) * 52px), calc(100% - env(safe-area-inset-right) - var(--u) * 452px - 8px));
+  bottom: calc(env(safe-area-inset-bottom) + 18px);
+  color: #2bffd0;
+  border-color: rgba(43, 255, 208, 0.85);
+  box-shadow: 0 0 18px rgba(43, 255, 208, 0.45), inset 0 0 14px rgba(43, 255, 208, 0.15);
+}
+.tb-grapple.show {
+  display: flex;
+}
+.tb-grapple.enemy {
+  color: #ff3b5a;
+  border-color: rgba(255, 59, 90, 0.85);
+  box-shadow: 0 0 18px rgba(255, 59, 90, 0.45), inset 0 0 14px rgba(255, 59, 90, 0.15);
+}
+.tb-grapple .label {
+  font-size: calc(var(--u) * 12px);
 }

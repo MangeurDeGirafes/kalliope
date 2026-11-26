@@ -36,6 +36,10 @@ export class PlayerController {
   freeDash = false;
   /** Bonus BOUCLIER : tirs absorbés restants. */
   shield = 0;
+  /** Grappin : temps de traction restant (s) et point d'accroche. */
+  private grappleTimer = 0;
+  private grappleCarry = 17;
+  readonly grapplePoint = new THREE.Vector3();
 
   /** Centre de la capsule. */
   readonly position = new THREE.Vector3();
@@ -141,7 +145,69 @@ export class PlayerController {
     return this.position.y - (this.halfHeight + PLAYER.radius);
   }
 
-  /** Vrai pendant le dash de l'attaque chargée. */
+  /** Vrai pendant la traction du grappin. */
+  get isGrappling(): boolean {
+    return this.grappleTimer > 0;
+  }
+
+  /** Lance le grappin : traction vers `point`, élan conservé à l'arrivée. */
+  startGrapple(point: THREE.Vector3, maxTime: number, carry = 17): void {
+    if (!this.alive) return;
+    this.grapplePoint.copy(point);
+    this.grappleTimer = maxTime;
+    this.grappleCarry = carry;
+    this.dashing = false;
+    this.lungeTimer = 0;
+    this.chargeDashTimer = 0;
+    if (this.wallRunning) this.endWallRun(false);
+    this.sliding = false;
+    this.grounded = false;
+    this.justJumpedTimer = 0.25;
+    // S'accrocher rend le double saut
+    this.airJumps = STATS.airJumps;
+    this.fovKick = Math.max(this.fovKick, 8);
+  }
+
+  /**
+   * Lâche le grappin. À l'arrivée (`boost`), l'élan est canalisé : ~17 m/s à
+   * l'horizontale (selon l'ancre) et une impulsion vers le haut, de quoi
+   * retomber sur le toit suivant sans s'envoler au-delà.
+   */
+  endGrapple(boost: boolean): void {
+    if (this.grappleTimer <= 0) return;
+    this.grappleTimer = 0;
+    this.clampHorizontal(boost ? this.grappleCarry : 21);
+    if (boost) this.velocity.y = THREE.MathUtils.clamp(this.velocity.y, 6, 9);
+  }
+
+  private clampHorizontal(max: number): void {
+    const h = Math.hypot(this.velocity.x, this.velocity.z);
+    if (h > max) {
+      this.velocity.x *= max / h;
+      this.velocity.z *= max / h;
+    }
+  }
+
+  /** Met à jour le point d'accroche (cible mobile : drone). */
+  setGrapplePoint(point: THREE.Vector3): void {
+    this.grapplePoint.copy(point);
+  }
+
+  private updateGrapple(dt: number): void {
+    this.grappleTimer -= dt;
+    const to = this.tmp.subVectors(this.grapplePoint, this.position);
+    const dist = to.length();
+    if (dist < 2.2) {
+      this.endGrapple(true);
+      return;
+    }
+    // Traction : la vitesse tend vers 30 m/s dans l'axe de la corde
+    to.divideScalar(dist).multiplyScalar(30);
+    to.y += 2;
+    this.velocity.lerp(to, 1 - Math.exp(-9 * dt));
+    if (this.grappleTimer <= 0) this.endGrapple(false);
+  }
+
   get isChargeDashing(): boolean {
     return this.chargeDashTimer > 0;
   }
@@ -206,6 +272,7 @@ export class PlayerController {
     this.mantleCooldown = 0;
     this.lungeTimer = 0;
     this.chargeDashTimer = 0;
+    this.grappleTimer = 0;
     this.airTime = 0;
     this.invulnerable = 0;
     this.regenTimer = 0;
@@ -386,6 +453,7 @@ export class PlayerController {
     this.slideHeld = false;
     this.lungeTimer = 0;
     this.chargeDashTimer = 0;
+    this.grappleTimer = 0;
     this.dashing = false;
     if (this.wallRunning) this.endWallRun(false);
     this.sliding = false;
@@ -455,7 +523,9 @@ export class PlayerController {
 
     if (dashPressed) this.tryDash(hasWish);
 
-    if (this.chargeDashTimer > 0) {
+    if (this.grappleTimer > 0) {
+      this.updateGrapple(dt);
+    } else if (this.chargeDashTimer > 0) {
       this.updateChargeDash(dt);
     } else if (this.lungeTimer > 0) {
       this.lungeTimer -= dt;
@@ -482,13 +552,13 @@ export class PlayerController {
     if (jumpPressed) this.handleJumpPress(hasWish);
     if (this.jumpBuffer > 0 && this.grounded && !this.dashing) this.groundJump();
 
-    if (!this.grounded && !this.wallRunning && !this.dashing) {
+    if (!this.grounded && !this.wallRunning && !this.dashing && this.grappleTimer <= 0) {
       if (pushingForward) this.tryStartWallRun();
       if (pushingForward && !this.wallRunning) this.tryMantle();
     }
 
     // Gravité
-    if (!this.dashing && this.lungeTimer <= 0 && this.chargeDashTimer <= 0 && !this.grounded) {
+    if (!this.dashing && this.lungeTimer <= 0 && this.chargeDashTimer <= 0 && this.grappleTimer <= 0 && !this.grounded) {
       let g: number = MOVEMENT.gravity;
       if (this.wallRunning) {
         const k = Math.min(1, this.wallRunTimer / WALLRUN.maxDuration);
@@ -653,6 +723,14 @@ export class PlayerController {
 
   private handleJumpPress(hasWish: boolean): void {
     if (this.chargeDashTimer > 0) return;
+    if (this.grappleTimer > 0) {
+      // Lâcher en sautant : on garde l'élan et on gagne de la hauteur
+      this.grappleTimer = 0;
+      this.clampHorizontal(21);
+      this.velocity.y = Math.min(Math.max(this.velocity.y + 2, MOVEMENT.jumpVelocity), 12);
+      this.audio.playJump();
+      return;
+    }
     if (this.dashing) this.endDash();
     if (this.wallRunning) {
       this.wallJump();
@@ -703,6 +781,7 @@ export class PlayerController {
 
   private tryDash(hasWish: boolean): void {
     if (this.dashing || this.lungeTimer > 0 || this.chargeDashTimer > 0) return;
+    this.grappleTimer = 0;
     if (DASH.airOnly && this.grounded) return;
     if (this.dashCharges <= 0) {
       this.audio.playDenied();

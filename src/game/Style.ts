@@ -23,6 +23,8 @@ const CAUSE_BONUS: Record<KillCause, [number, string | null]> = {
   charged: [60, 'CHARGÉE'],
   wire: [30, 'FOUET'],
   slam: [80, 'SÉISME'],
+  grapple: [70, 'HARPON'],
+  blast: [90, 'EXPLOSION'],
 };
 
 const RANKS: Rank[] = ['D', 'C', 'B', 'A', 'S'];

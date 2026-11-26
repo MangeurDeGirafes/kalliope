@@ -3,6 +3,9 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Physics } from '../core/Physics';
 import type { EnemySpawn } from '../enemies/EnemyManager';
 import { Rain } from './Rain';
+import { Searchlights } from '../effects/Searchlights';
+import { createPuddleMaterial, createPuddleMesh } from '../effects/Puddles';
+import type { PuddleDef } from '../effects/Puddles';
 import { Steam } from './Steam';
 import { createHoloTexture, createPanelTexture, createRng, createStreetTexture, scaleBoxUVs } from './Textures';
 import {
@@ -84,6 +87,8 @@ export class LevelBuilder {
   private readonly scene: THREE.Scene;
   private readonly physics: Physics;
   private readonly rng = createRng(1337);
+  private readonly puddleMaterial = createPuddleMaterial();
+  private searchlights: Searchlights | null = null;
   private readonly batches = new Map<THREE.Material, THREE.BufferGeometry[]>();
   private readonly facadeMaterials: THREE.MeshStandardMaterial[];
   private readonly roofMaterials = new Map<RoofStyle, THREE.MeshStandardMaterial>();
@@ -161,6 +166,7 @@ export class LevelBuilder {
     this.addStreetGlow();
     this.flushBatches(this.scene);
     this.rain = new Rain(this.scene);
+    this.searchlights = new Searchlights(this.scene, QUALITY.searchlights);
   }
 
   /**
@@ -174,7 +180,16 @@ export class LevelBuilder {
       enemySpawns.push({ type: 'guard', position: new THREE.Vector3(x, y, z), yaw });
       this.exclusions.push({ x, z, r: 3 });
     }
+    for (const [x, y, z, yaw] of def.shields ?? []) {
+      enemySpawns.push({ type: 'shield', position: new THREE.Vector3(x, y, z), yaw });
+      this.exclusions.push({ x, z, r: 3 });
+    }
+    for (const [x, y, z, yaw] of def.snipers ?? []) {
+      enemySpawns.push({ type: 'sniper', position: new THREE.Vector3(x, y, z), yaw });
+      this.exclusions.push({ x, z, r: 3 });
+    }
     for (const [x, y, z] of def.drones) enemySpawns.push({ type: 'drone', position: new THREE.Vector3(x, y, z), yaw: 0 });
+    for (const [x, y, z] of def.kamikazes ?? []) enemySpawns.push({ type: 'kamikaze', position: new THREE.Vector3(x, y, z), yaw: 0 });
     this.exclusions.push({ x: def.spawn[0], z: def.spawn[2], r: 3 });
 
     for (const b of def.buildings) {
@@ -196,6 +211,9 @@ export class LevelBuilder {
       }
     }
 
+    this.addPuddles(def);
+    this.searchlights?.setTint(def.theme.skyGlow, def.theme.storm ? 0.55 : 0.42);
+
     decorate?.(this);
     // Accessoires de toit placés en dernier pour éviter les zones réservées
     for (const r of this.roofs) this.addRoofProps(r.cx, r.cz, r.w, r.d, r.top, r.seed);
@@ -209,7 +227,8 @@ export class LevelBuilder {
       enemySpawns,
       jumpPads: this.jumpPads,
       finish: { position: finish, radius: 3.2 },
-      killPlaneY: WORLD.killPlaneY,
+      // Plan de mort à 30 m sous le toit le plus bas (pas de longue chute dans les niveaux en altitude)
+      killPlaneY: Math.max(WORLD.killPlaneY, Math.min(...def.buildings.map((b) => b.top)) - 30),
     };
   }
 
@@ -295,6 +314,8 @@ export class LevelBuilder {
       this.blinkMaterial.color.setRGB((on ? 6 : 0.4) * b, (on ? 0.2 : 0.02) * b, (on ? 0.2 : 0.02) * b);
     }
 
+    this.puddleMaterial.uniforms.uTime.value = t;
+    this.searchlights?.update(dt);
     this.updateTraffic(dt);
     this.steam.update(dt, cameraPosition);
     this.rain?.update(dt, cameraPosition);
@@ -475,6 +496,27 @@ export class LevelBuilder {
     }
     // Bandeau lumineux sous le toit
     this.batchBox(this.neon(trimColor, 1.4), w + 0.1, 0.25, d + 0.1, cx, top - 1.4, cz);
+  }
+
+  /** Flaques de pluie aux reflets de néon sur les toits assez grands. */
+  private addPuddles(def: LevelDef): void {
+    const rng = createRng(def.id.length * 131 + def.buildings.length * 17);
+    const accents = [NEON.cyan, NEON.magenta, NEON.pink, NEON.purple, NEON.amber, NEON.teal];
+    const defs: PuddleDef[] = [];
+    for (const b of def.buildings) {
+      if (b.w < 6 || b.d < 6) continue;
+      const count = THREE.MathUtils.clamp(Math.round((b.w * b.d) / 110), 1, 6);
+      for (let i = 0; i < count; i++) {
+        const r = 0.8 + rng() * 1.5;
+        const mx = Math.max(0, b.w / 2 - r * 1.3 - 0.4);
+        const mz = Math.max(0, b.d / 2 - r * 1.3 - 0.4);
+        const hex = rng() < 0.55 ? NEON[b.trim] : accents[Math.floor(rng() * accents.length)];
+        defs.push({ x: b.x + (rng() * 2 - 1) * mx, y: b.top + 0.025, z: b.z + (rng() * 2 - 1) * mz, r, color: new THREE.Color(hex), seed: rng() });
+      }
+    }
+    const mesh = createPuddleMesh(defs, this.puddleMaterial);
+    if (mesh) this.course.add(mesh);
+    this.puddleMaterial.uniforms.uGain.value = 0.55 + 0.45 * def.theme.rain;
   }
 
   private queueRoofProps(cx: number, cz: number, w: number, d: number, top: number, seed: number): void {

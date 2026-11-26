@@ -105,6 +105,14 @@ export const STORY_LOGS: readonly StoryLog[] = [
       return `La Sentinelle d'Aegis s'écrase sur le toit de sa propre tour, et avec elle les 3 % de purge qui restaient. En bas, les écrans du secteur passent en boucle la voix de ${w.ton}. Quelqu'un, quelque part, rallume ses néons. Tu restes un moment sous la pluie, à écouter. Puis tu repars en courant. Pas pour fuir : parce que tu aimes ça.`;
     },
   },
+  {
+    level: 5,
+    code: 'SIGNAL EN DIRECT',
+    title: 'DE L\'AUTRE CÔTÉ DU FLEUVE',
+    fragment: false,
+    text: () =>
+      'Au sommet de l\'antenne, ton terminal accroche une fréquence que plus personne n\'utilise. Pas un enregistrement : une voix, en direct, un peu essoufflée. « … tu as toujours grimpé plus vite que moi. Ne dis rien, ils écoutent encore. Regarde vers le fleuve : une lumière va clignoter trois fois. C\'est moi. » Au loin, de l\'autre côté de l\'eau noire, une lumière clignote. Une fois. Deux fois. Trois.',
+  },
 ];
 
 export function logForLevel(level: number): StoryLog | null {

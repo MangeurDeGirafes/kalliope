@@ -23,7 +23,8 @@ export type Action =
   | 'music'
   | 'cycleWeapon'
   | 'restart'
-  | 'interact';
+  | 'interact'
+  | 'grapple';
 
 const BINDINGS: Record<Action, readonly string[]> = {
   forward: ['KeyW', 'KeyZ', 'ArrowUp'],
@@ -41,7 +42,8 @@ const BINDINGS: Record<Action, readonly string[]> = {
   /** Arme suivante (bouton tactile ⇄ ; la molette fait de même au clavier/souris). */
   cycleWeapon: [],
   restart: ['KeyR'],
-  interact: ['KeyE', 'KeyF'],
+  interact: ['KeyE'],
+  grapple: ['KeyF', 'KeyG'],
 };
 
 export const MouseButton = {

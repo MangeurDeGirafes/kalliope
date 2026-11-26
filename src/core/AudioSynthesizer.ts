@@ -241,6 +241,15 @@ export class AudioSynthesizer {
     this.tone({ type: 'square', from: 2200, to: 600, duration: 0.06, volume: 0.08, delay: 0.15 });
   }
 
+  /** Grappin : claquement du lanceur, sifflement du câble, verrouillage magnétique. */
+  playGrapple(): void {
+    this.noise({ duration: 0.05, volume: 0.5, type: 'bandpass', from: 2400, to: 1400, q: 1.2 });
+    this.tone({ type: 'square', from: 1400, to: 3800, duration: 0.12, volume: 0.04 });
+    this.noise({ duration: 0.22, volume: 0.22, type: 'highpass', from: 7000, to: 3000, q: 0.7, delay: 0.02 });
+    this.tone({ type: 'sine', from: 180, to: 110, duration: 0.35, volume: 0.14, delay: 0.08 });
+    this.tone({ type: 'triangle', from: 1760, to: 1760, duration: 0.07, volume: 0.06, delay: 0.1 });
+  }
+
   /** Secret découvert : carillon doux. */
   playSecret(): void {
     this.tone({ type: 'sine', from: 660, to: 660, duration: 0.5, volume: 0.07, raw: true });
@@ -351,6 +360,23 @@ export class AudioSynthesizer {
   playEnemyAim(volume = 1): void {
     this.tone({ type: 'square', from: 600, to: 1400, duration: 0.5, volume: 0.035 * volume });
     this.tone({ type: 'sine', from: 1200, to: 2400, duration: 0.5, volume: 0.03 * volume, delay: 0.05 });
+  }
+
+  /** Tireur d'élite : longue montée de visée. */
+  playSniperAim(volume = 1): void {
+    this.tone({ type: 'sine', from: 300, to: 1800, duration: 2.1, volume: 0.05 * volume });
+    this.tone({ type: 'square', from: 2400, to: 2400, duration: 0.05, volume: 0.03 * volume, delay: 1.9 });
+    this.tone({ type: 'square', from: 2400, to: 2400, duration: 0.05, volume: 0.03 * volume, delay: 2.05 });
+  }
+
+  playSniperShot(volume = 1): void {
+    this.noise({ duration: 0.35, volume: 0.5 * volume, type: 'lowpass', from: 6000, to: 300, q: 0.6 });
+    this.tone({ type: 'sawtooth', from: 2600, to: 90, duration: 0.3, volume: 0.12 * volume });
+  }
+
+  /** Bip du drone kamikaze (plus aigu à l'approche). */
+  playKamikazeBeep(pitch = 1, volume = 1): void {
+    this.tone({ type: 'square', from: 1300 * pitch, to: 1300 * pitch, duration: 0.06, volume: 0.05 * volume });
   }
 
   playEnemyShot(volume = 1): void {

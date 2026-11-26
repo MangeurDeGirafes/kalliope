@@ -5,7 +5,7 @@ import type { InputManager } from '../core/InputManager';
 import { MouseButton } from '../core/InputManager';
 import type { AudioSynthesizer } from '../core/AudioSynthesizer';
 import type { ParticleSystem } from '../effects/ParticleSystem';
-import type { Enemy, EnemyManager } from '../enemies/EnemyManager';
+import type { Enemy, EnemyManager, KillCause } from '../enemies/EnemyManager';
 import type { PlayerController } from '../player/PlayerController';
 import { Beam } from '../effects/Beam';
 import { BladeTrail } from '../effects/BladeTrail';
@@ -761,7 +761,7 @@ export class WeaponManager {
   }
 
   /** Un projectile hitscan : tue l'ennemi touché, étincelles sur le décor, rayon visible. */
-  private castShot(origin: THREE.Vector3, dir: THREE.Vector3, range: number, assist: number, width: number): boolean {
+  private castShot(origin: THREE.Vector3, dir: THREE.Vector3, range: number, assist: number, width: number, cause: KillCause = 'shot'): boolean {
     const worldHit = this.physics.raycast(origin, dir, range);
     const maxDist = worldHit ? worldHit.distance : range;
     const enemyHit = this.enemies.raycast(origin, dir, maxDist, assist);
@@ -769,7 +769,8 @@ export class WeaponManager {
     let end: THREE.Vector3;
     if (enemyHit) {
       end = enemyHit.point;
-      if (enemyHit.enemy) this.enemies.kill(enemyHit.enemy, dir, 'shot');
+      // Balle simple : arrêtée par un bouclier de face ; la chevrotine chargée le traverse
+      if (enemyHit.enemy) this.enemies.damage(enemyHit.enemy, Infinity, dir, cause);
       else enemyHit.target?.hit(1, dir, 'shot');
     } else if (worldHit) {
       end = worldHit.point;
@@ -828,7 +829,7 @@ export class WeaponManager {
       const h = (i - (n - 1) / 2) * spread;
       const v = n > 3 && i % 2 === 1 ? spread * 0.45 : 0;
       dir.copy(forward).addScaledVector(right, Math.tan(h)).addScaledVector(up, Math.tan(v)).normalize();
-      this.castShot(origin, dir, SHOTGUN.range, assist, 1.6);
+      this.castShot(origin, dir, SHOTGUN.range, assist, 1.6, 'charged');
     }
     const muzzleWorld = this.muzzle.getWorldPosition(new THREE.Vector3());
     this.particles.burst(muzzleWorld, {

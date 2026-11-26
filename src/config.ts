@@ -238,6 +238,36 @@ export const ENEMIES = {
     orbitSpeed: 0.7,
     hoverAmplitude: 0.35,
   },
+  /** Garde à bouclier : bloque les coups simples portés de face (±blockDeg). */
+  shield: {
+    detectionRange: 40,
+    aimDuration: 1.3,
+    cooldown: 2.6,
+    projectileSpeed: 28,
+    turnSpeed: 2.6,
+    blockDeg: 70,
+  },
+  /** Tireur d'élite : long télégraphe, tir rapide et lourd (renvoyable). */
+  sniper: {
+    detectionRange: 95,
+    aimDuration: 2.3,
+    cooldown: 3.4,
+    projectileSpeed: 68,
+    turnSpeed: 2.2,
+    damage: 2,
+  },
+  /** Drone kamikaze : s'arme, fonce sur le joueur et explose. */
+  kamikaze: {
+    detectionRange: 34,
+    armTime: 0.6,
+    speed: 19,
+    accel: 26,
+    turnRate: 3.4,
+    fuse: 5,
+    triggerRadius: 1.9,
+    blastRadius: 4.2,
+    damage: 1,
+  },
   aimLagRate: 5,
   aimLockTime: 0.22,
   losCheckInterval: 0.15,
@@ -315,6 +345,8 @@ export interface QualityPreset {
   trafficCount: number;
   /** Lumières ponctuelles décoratives le long du parcours (coûteuses sur mobile). */
   neonLights: boolean;
+  /** Nombre de projecteurs d'Aegis qui balaient le ciel. */
+  searchlights: number;
 }
 
 export const QUALITY_PRESETS: { desktop: QualityPreset; mobile: QualityPreset } = {
@@ -326,6 +358,7 @@ export const QUALITY_PRESETS: { desktop: QualityPreset; mobile: QualityPreset } 
     rainCount: 3800,
     trafficCount: 34,
     neonLights: true,
+    searchlights: 9,
   },
   mobile: {
     initialPixelRatio: 1.0,
@@ -335,6 +368,7 @@ export const QUALITY_PRESETS: { desktop: QualityPreset; mobile: QualityPreset } 
     rainCount: 1600,
     trafficCount: 16,
     neonLights: false,
+    searchlights: 5,
   },
 };
 
@@ -353,4 +387,22 @@ export const TOUCH = {
   lungeConeDeg: 32,
   vibrationKill: 18,
   vibrationHurt: 45,
+} as const;
+
+/** Grappin magnétique : ancres flottantes et drones / gardes ciblables. */
+export const GRAPPLE = {
+  /** Portée vers une ancre (m). */
+  range: 34,
+  /** Portée vers un ennemi (m). */
+  enemyRange: 26,
+  /** Distance minimale (trop près : inutile). */
+  minDistance: 3.5,
+  /** Demi-angle du cône de visée (souris / tactile). */
+  coneDeg: 22,
+  touchConeDeg: 30,
+  /** Durée maximale de la traction. */
+  pullTime: 1.4,
+  cooldown: 0.35,
+  /** Rebond après une élimination au grappin. */
+  killBounce: 10,
 } as const;

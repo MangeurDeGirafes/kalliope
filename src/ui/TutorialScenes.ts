@@ -475,6 +475,109 @@ export const sceneDash: Scene = (ctx, t) => {
   rain(ctx, t);
 };
 
+/** Grappin : visée d'une ancre au-dessus du vide, traction, atterrissage. */
+export const sceneGrapple: Scene = (ctx, t) => {
+  const tt = t % 4;
+  sky(ctx);
+  skyline(ctx, 120);
+  roof(ctx, 0, 72, 52);
+  roof(ctx, 112, 60, 48, C.cyan);
+  const ax = 98;
+  const ay = 22;
+  // Ancre magnétique : anneau pulsant
+  const pulse = 1 + Math.round(Math.sin(t * 6) * 0.6);
+  ctx.strokeStyle = C.green;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(ax - 4 - pulse, ay - 4 - pulse, 8 + pulse * 2, 8 + pulse * 2);
+  px(ctx, ax - 1, ay - 1, 3, 3, C.white);
+  const p = clamp01(tt / 3.2);
+  let x: number;
+  let y = 72;
+  let pose: Pose = 'run';
+  let rope = false;
+  if (p < 0.3) {
+    x = 8 + (p / 0.3) * 38;
+    if (p > 0.18) {
+      // Repère de visée sur l'ancre
+      ctx.strokeStyle = C.yellow;
+      ctx.strokeRect(ax - 7, ay - 7, 14, 14);
+    }
+  } else if (p < 0.55) {
+    const u = (p - 0.3) / 0.25;
+    const e = u * u * (3 - 2 * u);
+    x = 46 + (ax - 6 - 46) * e;
+    y = 72 + (ay + 8 - 72) * e;
+    pose = 'jump';
+    rope = true;
+  } else if (p < 0.8) {
+    const u = (p - 0.55) / 0.25;
+    x = ax - 6 + u * 30;
+    y = ay + 8 - Math.sin(u * Math.PI) * 8 + u * (60 - ay - 8);
+    pose = 'jump';
+  } else {
+    x = 122 + ((p - 0.8) / 0.2) * 20;
+    y = 60;
+    if (p >= 1) pose = 'stand';
+  }
+  if (rope) {
+    ctx.strokeStyle = C.green;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x) + 0.5, Math.round(y - 9) + 0.5);
+    ctx.lineTo(ax + 0.5, ay + 0.5);
+    ctx.stroke();
+    text(ctx, 'TRACTION', 40, 34, C.green);
+  }
+  runner(ctx, x, y, pose, t);
+  text(ctx, 'GRAPPIN', 4, 4, C.white);
+  if (p > 0.18 && p < 0.3) text(ctx, 'F', ax + 9, ay - 3, C.yellow);
+  rain(ctx, t);
+};
+
+/** Bestiaire d'Aegis : garde à bouclier contourné, tireur d'élite, kamikaze. */
+export const sceneBestiary: Scene = (ctx, t) => {
+  const tt = t % 6;
+  sky(ctx);
+  skyline(ctx, 40);
+  roof(ctx, 0, 74, SCENE_W, C.red);
+  // Garde à bouclier : le coup de face rebondit, le coup de dos passe
+  const sx = 28;
+  const phase = tt % 3;
+  guard(ctx, sx, 74, t);
+  ctx.globalAlpha = 0.55 + Math.sin(t * 7) * 0.1;
+  px(ctx, sx - 9, 58, 2, 14, '#40c8ff');
+  ctx.globalAlpha = 1;
+  px(ctx, sx - 9, 58, 2, 1, '#c8f4ff');
+  px(ctx, sx - 9, 71, 2, 1, '#c8f4ff');
+  if (phase < 1.5) {
+    const rx = 8 + Math.min(1, phase / 0.6) * 8;
+    runner(ctx, rx, 74, 'stand', t);
+    if (phase > 0.6 && phase < 0.9) burst(ctx, sx - 9, 64, (phase - 0.6) / 0.3, ['#40c8ff', '#ffffff']);
+    if (phase > 0.6) text(ctx, 'BLOQUÉ', 4, 40, '#40c8ff');
+  } else {
+    runner(ctx, sx + 9, 74, 'stand', t);
+    text(ctx, 'DE DOS !', 18, 40, C.lime);
+  }
+  // Tireur d'élite : long laser ambre
+  const nx = 88;
+  guard(ctx, nx, 74, t);
+  const k = (tt % 2.4) / 2.4;
+  const blink = k > 0.85 && Math.sin(t * 60) > 0;
+  ctx.globalAlpha = 0.25 + k * 0.6;
+  line(ctx, nx - 6, 65, nx - 40, 72, blink ? '#ffffff' : C.amber);
+  ctx.globalAlpha = 1;
+  text(ctx, 'SNIPER', nx - 14, 48, C.amber);
+  // Kamikaze : clignote puis fonce
+  const kx = 138 - ((tt * 10) % 24);
+  const ky = 54 + Math.sin(t * 5) * 2;
+  px(ctx, kx - 2, ky - 2, 5, 5, C.armor);
+  px(ctx, kx - 1, ky - 1, 3, 3, Math.sin(t * 20) > 0 ? '#ff7a20' : '#ffd23b');
+  px(ctx, kx - 4, ky, 2, 1, '#ff7a20');
+  px(ctx, kx + 3, ky, 2, 1, '#ff7a20');
+  text(ctx, 'KAMIKAZE', 118, 64, '#ff7a20');
+  text(ctx, 'BESTIAIRE', 4, 4, C.white);
+  rain(ctx, t);
+};
+
 /** Combat : laser de visée, renvoi du projectile, élimination. */
 export const sceneCombat: Scene = (ctx, t) => {
   const tt = t % 5.5;

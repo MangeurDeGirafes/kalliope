@@ -18,6 +18,7 @@ const CyberFxShader = {
     uDamage: { value: 0 },
     uDeath: { value: 0 },
     uSpeed: { value: 0 },
+    uKill: { value: 0 },
     uAspect: { value: 1 },
   },
   vertexShader: /* glsl */ `
@@ -34,6 +35,7 @@ const CyberFxShader = {
     uniform float uDamage;
     uniform float uDeath;
     uniform float uSpeed;
+    uniform float uKill;
     uniform float uAspect;
     varying vec2 vUv;
 
@@ -46,7 +48,7 @@ const CyberFxShader = {
       float dist = length(centered * vec2(uAspect, 1.0));
 
       // Aberration chromatique radiale
-      float ca = 0.0012 + uSandevistan * 0.006 + uDamage * 0.012 + uSpeed * 0.002;
+      float ca = 0.0012 + uSandevistan * 0.006 + uDamage * 0.012 + uSpeed * 0.002 + uKill * 0.009;
       vec2 dir = centered * ca * (0.4 + dist * 2.0);
 
       // Glitch horizontal pendant le Sandevistan
@@ -64,6 +66,10 @@ const CyberFxShader = {
       sandTint = pow(max(sandTint, vec3(0.0)), vec3(1.18)) + vec3(0.0, 0.012, 0.01);
       float scan = 0.93 + 0.07 * sin(vUv.y * 900.0 + uTime * 30.0);
       col = mix(col, sandTint * scan, uSandevistan);
+
+      // Impact d'élimination : bref éclat froid sur les bords
+      col += vec3(0.25, 0.7, 1.0) * uKill * 0.12 * smoothstep(0.2, 0.9, dist);
+      col *= 1.0 + uKill * 0.08;
 
       // Vignette
       float vig = smoothstep(0.95, 0.25, dist);
@@ -91,6 +97,8 @@ export interface ScreenEffects {
   damage: number;
   death: number;
   speed: number;
+  /** Éclat d'élimination (0 → 1, décroît vite). */
+  kill?: number;
 }
 
 /**
@@ -206,6 +214,7 @@ export class Engine {
     u.uDamage.value = fx.damage;
     u.uDeath.value = fx.death;
     u.uSpeed.value = fx.speed;
+    u.uKill.value = fx.kill ?? 0;
     // Traînées fantômes façon Sandevistan
     this.afterimagePass.damp = fx.sandevistan * 0.7;
     this.bloomPass.strength = LIGHTING.bloomStrength + fx.sandevistan * 0.08;

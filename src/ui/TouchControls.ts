@@ -17,6 +17,7 @@ const ICONS = {
   swap: '<path d="M4 8 h15 l-4 -4"/><path d="M20 16 h-15 l4 4"/>',
   pause: '<path d="M8 5 v14"/><path d="M16 5 v14"/>',
   restart: '<path d="M19 12 a7 7 0 1 1 -2.4 -5.3"/><path d="M19 4 v5 h-5"/>',
+  grapple: '<path d="M12 21 v-9"/><path d="M8 15 l4 -3 l4 3"/><path d="M12 12 l-6 -6 M12 12 l6 -6"/><path d="M4 8 l2 -2 l2 2 M16 8 l2 -2 l2 2"/><circle cx="12" cy="4" r="1.5"/>',
   talk: '<path d="M4 5 h16 v10 h-9 l-5 4 v-4 h-2 z"/><path d="M8 10 h.01 M12 10 h.01 M16 10 h.01"/>',
 } as const;
 
@@ -107,6 +108,7 @@ export class TouchControls {
       { key: 'restart', label: '', icon: ICONS.restart, tap: () => this.pulseAction('restart') },
       { key: 'pause', label: '', icon: ICONS.pause, tap: () => this.onPause?.() },
       { key: 'interact', label: 'PARLER', icon: ICONS.talk, tap: () => this.pulseAction('interact') },
+      { key: 'grapple', label: 'GRAPPIN', icon: ICONS.grapple, tap: () => this.pulseAction('grapple') },
     ];
     for (const spec of specs) this.createButton(spec);
     this.resetJoystick();
@@ -152,6 +154,14 @@ export class TouchControls {
     b.el.classList.toggle('show', label !== null);
     const l = b.el.querySelector('.label');
     if (l && label !== null && l.textContent !== label) l.textContent = label;
+  }
+
+  /** Bouton du grappin : visible quand une cible est dans le viseur. */
+  setGrapple(state: 'none' | 'anchor' | 'enemy'): void {
+    const b = this.buttons.get('grapple');
+    if (!b) return;
+    b.el.classList.toggle('show', state !== 'none');
+    b.el.classList.toggle('enemy', state === 'enemy');
   }
 
   /** Relâche toutes les commandes (pause, fin de partie). */

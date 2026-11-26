@@ -31,7 +31,11 @@ import { StyleMeter, medalFor, rankBonus, scoreRun, RANK_ORDER } from './game/St
 import type { Rank } from './game/Style';
 import { POWER_INFO, PowerUpField } from './world/PowerUps';
 import type { PowerKind } from './world/PowerUps';
-import { CHARGED, COMBAT, SANDEVISTAN, TOUCH } from './config';
+import { CHARGED, COMBAT, GRAPPLE, SANDEVISTAN, TOUCH } from './config';
+import { GrappleSystem } from './world/Grapple';
+import { buildAntenna } from './world/Landmarks';
+import type { GrappleTarget } from './world/Grapple';
+import type { Enemy } from './enemies/EnemyManager';
 
 type GameState = 'menu' | 'playing' | 'paused' | 'dead' | 'finished' | 'shop';
 
@@ -137,6 +141,15 @@ export class Game {
   /** Temps passé en jeu sans contrôle actif (souris non verrouillée). */
   private inactiveTime = 0;
   private readonly tmp = new THREE.Vector3();
+  private readonly grapple: GrappleSystem;
+  private killFlash = 0;
+  private grappleTarget: GrappleTarget | null = null;
+  private grappleEnemy: Enemy | null = null;
+  private grappleCooldown = 0;
+  private readonly eye = new THREE.Vector3();
+  private readonly aimDir = new THREE.Vector3();
+  private readonly hand = new THREE.Vector3();
+  private readonly screen = new THREE.Vector3();
 
   static async create(container: HTMLElement): Promise<Game> {
     const physics = await Physics.create();
@@ -155,6 +168,7 @@ export class Game {
 
     this.player = new PlayerController(physics, this.audio, this.engine.camera);
     this.enemies = new EnemyManager(this.engine.scene, physics, this.particles, this.audio);
+    this.grapple = new GrappleSystem(this.engine.scene);
     this.weapons = new WeaponManager(this.engine, physics, this.enemies, this.particles, this.audio, this.player);
     this.hud = new HUD(document.body, STATS.dashMax, STATS.maxHealth, IS_TOUCH);
     this.shop = new Shop(document.body);
@@ -296,12 +310,29 @@ export class Game {
         this.hud.stylePop(`+${r.gain}${r.labels.length ? ` ${r.labels.join(' · ')}` : ''}`);
       }
       this.hitstop = COMBAT.hitstopDuration;
+      this.killFlash = 1;
       this.player.addShake(COMBAT.killShake);
       this.player.rewardKill();
       this.hud.hitMarker();
       this.audio.playKillConfirm();
       vibrate(TOUCH.vibrationKill);
       if (this.enemies.aliveCount === 0) this.hud.flashMessage('ZONE NETTOYÉE', '#2bffb0', 1800);
+    };
+
+    let blockHint = 0;
+    this.enemies.onBlocked = () => {
+      this.player.addShake(0.2);
+      this.hitstop = Math.max(this.hitstop, 0.04);
+      const now = performance.now();
+      if (now - blockHint > 4000) {
+        blockHint = now;
+        this.hud.flashMessage('BLOQUÉ · PRENDS-LE DE DOS OU CHARGE', '#40c8ff', 1300);
+      }
+    };
+    this.enemies.onBlast = (pos, hurt) => {
+      const d = pos.distanceTo(this.player.position);
+      this.player.addShake(hurt ? 1 : THREE.MathUtils.clamp(1.2 - d / 20, 0.15, 0.8));
+      vibrate(hurt ? 60 : 20);
     };
 
     this.player.listener = {
@@ -590,6 +621,7 @@ export class Game {
     }
 
     this.weapons.update(playerDt, realDt, this.input, controlsEnabled);
+    this.updateGrapple(playerDt, controlsEnabled && this.mode === 'level');
     this.enemies.update(worldDt, this.player);
     if (this.mode === 'level' && this.boss && (this.state === 'playing' || this.state === 'dead')) this.boss.update(worldDt, this.player);
     this.hud.setBoss(this.mode === 'level' && this.boss ? this.boss.status() : null);
@@ -645,13 +677,93 @@ export class Game {
     });
 
     const speedFx = THREE.MathUtils.clamp((this.player.horizontalSpeed - 12) / 18, 0, 1);
+    this.killFlash = Math.max(0, this.killFlash - realDt * 4);
     this.engine.setEffects({
       sandevistan: sand,
       damage: this.player.hurtFlash,
       death: this.player.deathBlend,
       speed: speedFx,
+      kill: this.killFlash * this.killFlash,
     });
     this.engine.render(realDt);
+  }
+
+  /**
+   * Grappin : cible la mieux centrée (ancre ou ennemi), lancer sur F / G ou le
+   * bouton tactile, câble tendu pendant la traction. Un ennemi harponné est
+   * éliminé à l'arrivée et le joueur rebondit dessus.
+   */
+  private updateGrapple(dt: number, active: boolean): void {
+    const p = this.player;
+    this.grappleCooldown = Math.max(0, this.grappleCooldown - dt);
+    if (!active && this.state !== 'playing') {
+      if (p.isGrappling) p.endGrapple(false);
+      this.grappleEnemy = null;
+    }
+    const e = this.grappleEnemy;
+    if (e) {
+      if (!e.alive) {
+        this.grappleEnemy = null;
+        p.endGrapple(false);
+      } else if (p.position.distanceTo(e.center) < 2.8) {
+        this.grappleEnemy = null;
+        p.endGrapple(false);
+        this.tmp.subVectors(e.center, p.position).normalize();
+        this.enemies.kill(e, this.tmp, 'grapple');
+        p.velocity.set(p.velocity.x * 0.35, GRAPPLE.killBounce, p.velocity.z * 0.35);
+        this.hitstop = Math.max(this.hitstop, 0.09);
+        this.audio.playPunch();
+        vibrate(25);
+      } else if (!p.isGrappling) {
+        this.grappleEnemy = null;
+      } else {
+        p.setGrapplePoint(e.center);
+      }
+    }
+
+    const cam = this.engine.camera;
+    cam.getWorldPosition(this.eye);
+    cam.getWorldDirection(this.aimDir);
+    this.grappleTarget =
+      active && !p.isGrappling && p.alive
+        ? this.grapple.findTarget(this.eye, this.aimDir, this.enemies.list, this.physics, this.touch ? GRAPPLE.touchConeDeg : GRAPPLE.coneDeg)
+        : null;
+    if (this.grappleTarget && this.grappleCooldown <= 0 && this.input.wasPressed('grapple')) {
+      const t = this.grappleTarget;
+      p.startGrapple(t.point, GRAPPLE.pullTime, t.carry);
+      this.grappleEnemy = t.enemy;
+      this.grappleCooldown = GRAPPLE.cooldown;
+      this.grappleTarget = null;
+      this.audio.playGrapple();
+      vibrate(12);
+    }
+
+    // Câble : de la main gauche (bas gauche de l'écran) au point d'accroche
+    if (p.isGrappling) {
+      cam.updateMatrixWorld();
+      const m = cam.matrixWorld.elements;
+      this.hand
+        .copy(this.eye)
+        .addScaledVector(this.tmp.set(m[0], m[1], m[2]), -0.28)
+        .addScaledVector(this.tmp.set(m[4], m[5], m[6]), -0.24)
+        .addScaledVector(this.aimDir, 0.5);
+      this.grapple.update(dt, null, this.hand, p.grapplePoint);
+    } else {
+      this.grapple.update(dt, this.grappleTarget, null, null);
+    }
+
+    const t = this.grappleTarget;
+    if (t) {
+      this.screen.copy(t.point).project(cam);
+      if (this.screen.z < 1) {
+        this.hud.setGrappleTarget(((this.screen.x + 1) / 2) * window.innerWidth, ((1 - this.screen.y) / 2) * window.innerHeight, t.enemy !== null);
+      } else {
+        this.hud.setGrappleTarget(null);
+      }
+    } else {
+      this.hud.setGrappleTarget(null);
+    }
+    this.touch?.setGrapple(t ? (t.enemy ? 'enemy' : 'anchor') : 'none');
   }
 
   /** Écran titre : caméra qui balaie doucement la ligne d'horizon. */
@@ -677,6 +789,10 @@ export class Game {
 
   private restart(): void {
     this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
+    this.grappleEnemy = null;
+    this.grappleTarget = null;
+    this.grappleCooldown = 0;
+    this.grapple.update(0, null, null, null);
     this.style.reset();
     this.powerups.reset();
     this.powers.clear();
@@ -879,6 +995,7 @@ export class Game {
     this.levelData = this.level.loadLevel(def, (b) => {
       plaza.build(b, (id) => this.progress.hasEgg(id));
       this.powerups.build(b, []);
+      this.grapple.build(b, []);
     });
     this.audio.setMusicTheme('plaza');
     this.plaza = plaza;
@@ -1139,6 +1256,8 @@ export class Game {
     this.levelData = this.level.loadLevel(def, (b) => {
       for (const sd of def.secrets ?? []) secrets.push(buildSecret(b, sd, this.progress.hasFlag(`secret-${sd.id}`)));
       this.powerups.build(b, def.powerups ?? []);
+      this.grapple.build(b, def.anchors ?? []);
+      for (const lm of def.landmarks ?? []) if (lm.kind === 'antenna') buildAntenna(b, lm.pos[0], lm.pos[1], lm.pos[2], lm.height);
       if (def.boss) this.boss = new Boss(b, def.boss, { enemies: this.enemies, particles: this.particles, audio: this.audio });
     });
     this.secrets = secrets;
@@ -1165,6 +1284,8 @@ export class Game {
     this.touch?.releaseAll();
     this.touch?.setVisible(false);
     this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
+    this.grappleEnemy = null;
+    this.grapple.update(0, null, null, null);
     this.enemies.reset();
     this.weapons.reset();
     this.hud.setVisible(false);

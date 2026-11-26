@@ -26,6 +26,8 @@ export const NEON = {
 
 export type NeonColor = keyof typeof NEON;
 type Vec3 = [number, number, number];
+/** Ancre de grappin : [x, y, z, élan horizontal conservé à l'arrivée (m/s, 17 par défaut)]. */
+export type AnchorDef = [number, number, number, number?];
 
 export interface BuildingDef {
   x: number;
@@ -140,6 +142,12 @@ export interface LevelDef {
   pads: PadDef[];
   guards: [number, number, number, number][];
   drones: Vec3[];
+  /** Gardes à bouclier [x, y, z, lacet] : à contourner ou à briser (attaque chargée, séisme, fouet…). */
+  shields?: [number, number, number, number][];
+  /** Tireurs d'élite [x, y, z, lacet], souvent sur des toits voisins. */
+  snipers?: [number, number, number, number][];
+  /** Drones kamikazes. */
+  kamikazes?: Vec3[];
   holos: HoloDef[];
   /** Lumières décoratives ; absentes = une par grand toit, à sa couleur. */
   lights?: LightDef[];
@@ -151,6 +159,10 @@ export interface LevelDef {
   secrets?: SecretDef[];
   /** Bonus ramassables. */
   powerups?: PowerUpDef[];
+  /** Ancres magnétiques du grappin (points flottants). */
+  anchors?: AnchorDef[];
+  /** Grands repères (mât d'antenne…) : pied du mât et hauteur. */
+  landmarks?: { kind: 'antenna'; pos: Vec3; height: number }[];
   /** Temps des médailles or / argent / bronze (s). */
   par: [number, number, number];
   /** Thème musical (voir core/Music.ts). */
@@ -210,6 +222,12 @@ const NEON_ROOFTOPS: LevelDef = {
     ['chrono', 4, 6, -255],
   ],
   name: 'TOITS DE NÉON',
+  anchors: [
+    [0, 8.5, -97],
+    [0, 16.5, -139],
+    [0, 12.5, -199],
+    [0, 17.5, -269],
+  ],
   subtitle: 'Le parcours d\'initiation : toutes les mécaniques',
   difficulty: 1,
   spawn: [0, 0, 6],
@@ -292,6 +310,7 @@ const NEON_ROOFTOPS: LevelDef = {
     { lines: ['CLIC GAUCHE : LAMES MANTIS', '1 / 2 : CHANGER D\'ARME'], pos: [4.5, 3.2, -14], color: 'magenta', width: 5 },
     { lines: ['C / CTRL : GLISSADE', 'GARDE TON ÉLAN !'], pos: [-3, 3.2, -43], color: 'orange', width: 5 },
     { lines: ['WALL-RUN ►', 'SAUTE VERS LE MUR', 'EN MAINTENANT AVANCER'], pos: [5, 3.6, -68], color: 'lime', width: 4.6 },
+    { lines: ['◆ GRAPPIN : F', 'VISE L\'ANCRE, ÇA TIRE !'], pos: [-5.5, 3.4, -64], color: 'cyan', width: 4.8 },
     { lines: ['CLIC DROIT : SANDEVISTAN', 'LE TEMPS RALENTIT'], pos: [-5, 3, -108], color: 'green', width: 5 },
     { lines: ['▲ TREMPLIN ▲'], pos: [0, 4.2, -128], color: 'green', width: 3.6 },
     { lines: ['SHIFT : DASH', 'MUR À GAUCHE ◄'], pos: [-3, 11.4, -178], color: 'yellow', width: 5 },
@@ -334,6 +353,11 @@ const NIGHT_MARKET: LevelDef = {
     ['surge', 0, -1, -210],
   ],
   name: 'MARCHÉ DE NUIT',
+  anchors: [
+    [0, 8, -91],
+    [0, 7.5, -190],
+    [0, 3.5, -242],
+  ],
   subtitle: 'Enchaîne les murs sans jamais ralentir',
   difficulty: 2,
   spawn: [0, 0, 6],
@@ -399,6 +423,8 @@ const NIGHT_MARKET: LevelDef = {
     [0, 5, -212],
     [4, 1, -268],
   ],
+  shields: [[-3, -0.5, -157, 0]],
+  kamikazes: [[0, 4, -131]],
   holos: [
     { lines: ['NIVEAU 2 : MARCHÉ DE NUIT', 'GARDE TA VITESSE'], pos: [0, 2.8, -4], color: 'amber', width: 5.5 },
     { lines: ['DEUX MURS, PUIS DEUX AUTRES', 'NE LÂCHE PAS L\'AVANCE'], pos: [-4, 2.8, -126 + 4], color: 'lime', width: 5 },
@@ -419,6 +445,12 @@ const GLASS_TOWERS: LevelDef = {
     ['surge', 0, 9, -195],
   ],
   name: 'TOURS DE VERRE',
+  anchors: [
+    [0, 16.5, -27],
+    [0, 24.5, -67],
+    [0, 23.5, -107],
+    [0, 25.5, -215],
+  ],
   subtitle: 'Monte, saute, dashe au-dessus du vide',
   difficulty: 3,
   spawn: [0, 0, 6],
@@ -481,6 +513,8 @@ const GLASS_TOWERS: LevelDef = {
     [4, 14, -196],
     [0, 23, -238],
   ],
+  snipers: [[6, 9, -209, 0]],
+  kamikazes: [[0, 15, -160]],
   holos: [
     { lines: ['NIVEAU 3 : TOURS DE VERRE', 'MONTE TOUJOURS PLUS HAUT'], pos: [0, 2.8, -4], color: 'cyan', width: 5.5 },
     { lines: ['SAUTE, DOUBLE SAUT', 'PUIS DASH AU-DESSUS DU VIDE'], pos: [0, 19.5, -96], color: 'yellow', width: 5.5 },
@@ -501,6 +535,11 @@ const THE_FALL: LevelDef = {
     ['surge', 0, 14.5, -196],
   ],
   name: 'LA CHUTE',
+  anchors: [
+    [0, 29.5, -79],
+    [0, 23.5, -121],
+    [0, 23, -183],
+  ],
   subtitle: 'Descente sous l\'orage et arène finale',
   difficulty: 4,
   spawn: [0, 30, 6],
@@ -552,6 +591,9 @@ const THE_FALL: LevelDef = {
     [6, 21, -220],
     [0, 22, -228],
   ],
+  shields: [[0, 14.5, -200, 0]],
+  snipers: [[-6, 21, -112, 0]],
+  kamikazes: [[0, 25, -122], [-6, 19, -200]],
   holos: [
     { lines: ['NIVEAU 4 : LA CHUTE', 'NE REGARDE PAS EN BAS'], pos: [0, 32.8, -4], color: 'red', width: 5.5 },
     { lines: ['ATTAQUE CHARGÉE :', 'MAINTIENS, RELÂCHE, FONCE'], pos: [-4, 18, -134], color: 'magenta', width: 5.5 },
@@ -564,6 +606,15 @@ const THE_FALL: LevelDef = {
 const THE_PURGE: LevelDef = {
   id: 'la-purge',
   name: 'LA PURGE',
+  anchors: [
+    [0, 36.5, -61],
+    [0, 36, -117],
+    // Ancres de l'arène, au-dessus des piliers : esquiver le laser, puis retomber sur place
+    [-9, 37.5, -136, 2],
+    [9, 37.5, -136, 2],
+    [-9, 37.5, -160, 2],
+    [9, 37.5, -160, 2],
+  ],
   subtitle: 'Abats la Sentinelle d\'Aegis',
   difficulty: 4,
   par: [75, 100, 140],
@@ -601,6 +652,7 @@ const THE_PURGE: LevelDef = {
     [-8, 33, -140],
     [8, 33, -156],
   ],
+  shields: [[3, 28, -76, 0]],
   holos: [
     { lines: ['NIVEAU 5 : LA PURGE', 'LA SENTINELLE T\'ATTEND'], pos: [0, 22.8, -4], color: 'red', width: 5.5 },
     { lines: ['RENVOIE SES TIRS', 'FRAPPE SES CŒURS QUAND ELLE DESCEND'], pos: [0, 31, -118], color: 'yellow', width: 6 },
@@ -623,4 +675,99 @@ const THE_PURGE: LevelDef = {
   theme: { fog: 0x200814, fogDensity: 0.0078, rain: 0.8, skyHorizon: 0x4a0a2a, skyGlow: 0xff3b6a, skyWarm: 0xff6a3c, ambient: 0x5a2050, key: 0xff3b3b, storm: true },
 };
 
-export const LEVELS: readonly LevelDef[] = [NEON_ROOFTOPS, NIGHT_MARKET, GLASS_TOWERS, THE_FALL, THE_PURGE];
+
+/**
+ * Niveau 6 : l'Antenne. Des toits isolés au-dessus du vide, reliés seulement
+ * par les ancres du grappin, jusqu'au mât d'où part un signal en direct.
+ */
+const THE_ANTENNA: LevelDef = {
+  id: 'l-antenne',
+  name: 'L\'ANTENNE',
+  subtitle: 'Grappin au-dessus du vide, jusqu\'au signal',
+  difficulty: 4,
+  par: [32, 44, 60],
+  music: 'l-antenne',
+  spawn: [0, 40, 6],
+  spawnYaw: 0,
+  buildings: [
+    roof(0, 10, -24, 40, 16, 'cyan', 7, 'tar', 501),
+    roof(0, -52, -80, 40, 16, 'purple', 4, 'concrete', 502),
+    roof(0, -112, -140, 46, 14, 'teal', 2, 'green', 503),
+    { x: 0, z: -169, w: 12, d: 14, top: 44, trim: 'lime', facade: 5, roof: 'tar' },
+    roof(0, -196, -214, 48, 12, 'pink', 1, 'tar', 504),
+    roof(0, -270, -306, 52, 22, 'warm', 7, 'concrete', 505),
+    // Perchoirs des tireurs d'élite
+    { x: 26, z: -120, w: 7, d: 7, top: 52, trim: 'yellow', facade: 6, roof: 'tar', side: true },
+    { x: -24, z: -232, w: 7, d: 7, top: 58, trim: 'red', facade: 3, roof: 'rust', side: true },
+    // Socle du mât
+    { x: 19, z: -296, w: 10, d: 10, top: 52, trim: 'red', facade: 7, roof: 'concrete', side: true },
+  ],
+  anchors: [
+    [0, 48.5, -45],
+    [0, 54.5, -105],
+    [0, 52.5, -157, 8],
+    [0, 56.5, -189],
+    // Chaîne au-dessus du grand vide : on regrappine en plein vol
+    [0, 58, -232],
+    [0, 60, -258],
+    // Ancres de secours sur les côtés
+    [-9, 55, -244],
+    [9, 61, -122],
+  ],
+  landmarks: [{ kind: 'antenna', pos: [19, 52, -296], height: 38 }],
+  walls: [],
+  barriers: [{ x: 0, z: -282, roofWidth: 22, roofY: 52 }],
+  pads: [],
+  guards: [
+    [4, 40, -16, 0],
+    [-5, 40, -72, 0.2],
+    [4, 46, -124, -0.2],
+    [5, 48, -210, 0],
+    [0, 52, -298, 0],
+    [-7, 52, -292, 0.3],
+  ],
+  shields: [
+    [0, 40, -66, 0],
+    [-3, 46, -132, 0.2],
+    [0, 48, -206, 0],
+    [-5, 52, -290, 0],
+    [5, 52, -290, 0],
+  ],
+  snipers: [
+    [26, 52, -120, -0.9],
+    [-24, 58, -232, 0.7],
+  ],
+  drones: [
+    [3, 45, -60],
+    [6, 60, -246],
+    [0, 57, -284],
+  ],
+  kamikazes: [
+    [0, 47, -96],
+    [4, 49, -176],
+    [-3, 56, -276],
+  ],
+  holos: [
+    { lines: ['NIVEAU 6 : L\'ANTENNE', 'LE VIDE N\'EST QU\'UN DÉTOUR'], pos: [0, 42.8, -4], color: 'cyan', width: 5.5 },
+    { lines: ['◆ VISE L\'ANCRE', 'F : GRAPPIN'], pos: [-4, 43, -20], color: 'green', width: 4.6 },
+    { lines: ['ENCHAÎNE LES ANCRES', 'REGRAPPINE EN PLEIN VOL'], pos: [4, 51, -210], color: 'yellow', width: 5.2 },
+  ],
+  lights: [
+    { pos: [0, 46, -10], color: 'teal', intensity: 22, distance: 30 },
+    { pos: [0, 46, -66], color: 'purple', intensity: 22, distance: 30 },
+    { pos: [0, 52, -126], color: 'teal', intensity: 22, distance: 30 },
+    { pos: [0, 50, -169], color: 'lime', intensity: 18, distance: 26 },
+    { pos: [0, 54, -205], color: 'pink', intensity: 22, distance: 30 },
+    { pos: [0, 58, -288], color: 'sodium', intensity: 26, distance: 34 },
+  ],
+  powerups: [
+    ['overdrive', 0, 40, -10],
+    ['shield', 0, 40, -58],
+    ['surge', 0, 46, -118],
+    ['chrono', 0, 48, -200],
+  ],
+  finish: [0, 52, -300],
+  theme: { fog: 0x0c0a24, fogDensity: 0.006, rain: 0.6, skyHorizon: 0x1a1450, skyGlow: 0x7a5cff, skyWarm: 0x2bd9ff, ambient: 0x3a3a8a, key: 0x8a7aff },
+};
+
+export const LEVELS: readonly LevelDef[] = [NEON_ROOFTOPS, NIGHT_MARKET, GLASS_TOWERS, THE_FALL, THE_PURGE, THE_ANTENNA];

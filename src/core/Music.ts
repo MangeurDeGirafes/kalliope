@@ -122,6 +122,23 @@ export const MUSIC_THEMES: Record<string, MusicTheme> = {
     hat: 'xoxxxoxxxoxxxoxx',
     bass: 'xxoxxxoxxxoxxoxo',
   },
+  /** L'Antenne : aérien et ample, mode majeur qui s'élève (espoir du dernier signal). */
+  'l-antenne': {
+    id: 'l-antenne',
+    bpm: 132,
+    root: 47,
+    chords: [
+      { r: 0, q: 'M' },
+      { r: 7, q: 'M' },
+      { r: 9, q: 'm' },
+      { r: 5, q: 'M' },
+    ],
+    arp: [0, 2, 3, 2, 1, 2, 3, 2, 0, 2, 3, 2, 1, 3, 2, 3],
+    kick: 'x...x...x...x...',
+    snare: '....x.......x..x',
+    hat: '.xxx.xxx.xxx.xxo',
+    bass: 'x.ox.xo.x.ox.xox',
+  },
 };
 
 const midi = (n: number) => 440 * Math.pow(2, (n - 69) / 12);

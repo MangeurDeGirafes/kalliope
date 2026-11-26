@@ -4,10 +4,16 @@ import type { AudioSynthesizer } from '../core/AudioSynthesizer';
 import type { ParticleSystem } from '../effects/ParticleSystem';
 import type { PlayerController } from '../player/PlayerController';
 import { Beam } from '../effects/Beam';
+import { Debris } from '../effects/Debris';
 import { bakeGroup } from '../core/GeometryUtils';
 import { ENEMIES, LIGHTING } from '../config';
 
-export type EnemyType = 'guard' | 'drone';
+export type EnemyType = 'guard' | 'drone' | 'shield' | 'sniper' | 'kamikaze';
+
+/** Ennemis au sol à corps humanoïde : gardes, gardes à bouclier, tireurs d'élite. */
+export function isHumanoid(type: EnemyType): boolean {
+  return type === 'guard' || type === 'shield' || type === 'sniper';
+}
 
 export interface EnemySpawn {
   type: EnemyType;
@@ -15,7 +21,8 @@ export interface EnemySpawn {
   yaw?: number;
 }
 
-type EnemyState = 'idle' | 'aiming' | 'cooldown';
+/** `aiming` sert aussi d'armement au drone kamikaze, `rush` à sa charge. */
+type EnemyState = 'idle' | 'aiming' | 'cooldown' | 'rush';
 
 export interface Enemy {
   readonly type: EnemyType;
@@ -42,6 +49,13 @@ export interface Enemy {
   hp: number;
   /** Réaction de touche (secousse + visière blanche). */
   hurtTimer: number;
+  /** Vitesse (drone kamikaze en charge). */
+  readonly velocity: THREE.Vector3;
+  /** Bouclier holographique (garde à bouclier). */
+  readonly shieldMat: THREE.MeshBasicMaterial | null;
+  shieldFlash: number;
+  /** Prochain bip du kamikaze. */
+  beepTimer: number;
 }
 
 interface Projectile {
@@ -57,10 +71,12 @@ interface Projectile {
   active: boolean;
   friendly: boolean;
   life: number;
+  /** Dégâts infligés au joueur. */
+  damage: number;
 }
 
 /** Origine d'une élimination (points de style). */
-export type KillCause = 'melee' | 'shot' | 'deflect' | 'charged' | 'wire' | 'slam';
+export type KillCause = 'melee' | 'shot' | 'deflect' | 'charged' | 'wire' | 'slam' | 'grapple' | 'blast';
 
 /**
  * Cible extérieure touchable par toutes les armes (cœurs du boss) : tirs,
@@ -82,6 +98,8 @@ export interface EnemyRayHit {
 
 const GUARD_RED = new THREE.Color(1, 0.05, 0.12);
 const DRONE_MAGENTA = new THREE.Color(1, 0.1, 0.75);
+const SNIPER_AMBER = new THREE.Color(1, 0.62, 0.08);
+const SHIELD_BLUE = new THREE.Color(0.25, 0.78, 1);
 const FRIENDLY_CYAN = new THREE.Color(0.1, 0.9, 1);
 
 /**
@@ -92,6 +110,10 @@ const FRIENDLY_CYAN = new THREE.Color(0.1, 0.9, 1);
 export class EnemyManager {
   /** Appelé à chaque élimination. */
   onKill: ((enemy: Enemy, position: THREE.Vector3, cause: KillCause) => void) | null = null;
+  /** Coup arrêté par un bouclier. */
+  onBlocked: ((enemy: Enemy, position: THREE.Vector3) => void) | null = null;
+  /** Explosion d'un drone kamikaze (secousse, flash). */
+  onBlast: ((position: THREE.Vector3, hurtPlayer: boolean) => void) | null = null;
   /** Cibles extérieures (boss) enregistrées pour le niveau en cours. */
   readonly targets: ExternalTarget[] = [];
 
@@ -101,6 +123,7 @@ export class EnemyManager {
   private readonly audio: AudioSynthesizer;
   private readonly enemies: Enemy[] = [];
   private readonly projectiles: Projectile[] = [];
+  private readonly debris: Debris;
 
   private readonly armorMat = new THREE.MeshStandardMaterial({ color: 0x1b1d26, metalness: 0.75, roughness: 0.32 });
   private readonly clothMat = new THREE.MeshStandardMaterial({ color: 0x0b0c12, metalness: 0.1, roughness: 0.85 });
@@ -111,6 +134,14 @@ export class EnemyManager {
     metalness: 0.4,
     roughness: 0.4,
   });
+  private readonly accentAmberMat = new THREE.MeshStandardMaterial({
+    color: 0x201000,
+    emissive: 0xffa020,
+    emissiveIntensity: 2.2 * LIGHTING.enemyGlow,
+    metalness: 0.4,
+    roughness: 0.4,
+  });
+  private readonly accentBlueMat = new THREE.MeshBasicMaterial({ color: SHIELD_BLUE.clone().multiplyScalar(2.6 * LIGHTING.enemyGlow), toneMapped: false });
   private readonly accentMagentaMat = new THREE.MeshStandardMaterial({
     color: 0x200018,
     emissive: 0xff20c0,
@@ -142,6 +173,7 @@ export class EnemyManager {
     this.particles = particles;
     this.audio = audio;
     for (let i = 0; i < 72; i++) this.projectiles.push(this.createProjectile());
+    this.debris = new Debris(scene, physics);
   }
 
   get totalCount(): number {
@@ -154,6 +186,11 @@ export class EnemyManager {
     return false;
   }
 
+  /** Tous les ennemis du niveau (vivants ou non). */
+  get list(): readonly Enemy[] {
+    return this.enemies;
+  }
+
   get aliveCount(): number {
     let n = 0;
     for (const e of this.enemies) if (e.alive) n++;
@@ -162,7 +199,7 @@ export class EnemyManager {
 
   spawnAll(spawns: EnemySpawn[]): void {
     for (const s of spawns) {
-      const enemy = s.type === 'guard' ? this.createGuard(s) : this.createDrone(s);
+      const enemy = isHumanoid(s.type) ? this.createGuard(s) : this.createDrone(s);
       this.enemies.push(enemy);
       this.scene.add(enemy.root);
       this.scene.add(enemy.laser.mesh);
@@ -172,7 +209,7 @@ export class EnemyManager {
 
   /** Retire tous les ennemis (changement de niveau) et libère leurs ressources. */
   clearAll(): void {
-    const shared = new Set<THREE.Material>([this.armorMat, this.clothMat, this.accentRedMat, this.accentMagentaMat, this.rotorMat]);
+    const shared = new Set<THREE.Material>([this.armorMat, this.clothMat, this.accentRedMat, this.accentMagentaMat, this.accentAmberMat, this.accentBlueMat, this.rotorMat]);
     for (const e of this.enemies) {
       this.scene.remove(e.root);
       this.scene.remove(e.laser.mesh);
@@ -186,12 +223,13 @@ export class EnemyManager {
     }
     this.enemies.length = 0;
     for (const p of this.projectiles) this.deactivate(p);
+    this.debris.clear();
   }
 
   reset(): void {
     for (const e of this.enemies) {
       e.alive = true;
-      e.hp = ENEMIES.health;
+      e.hp = e.type === 'kamikaze' ? 1 : ENEMIES.health;
       e.hurtTimer = 0;
       e.root.visible = true;
       e.state = 'idle';
@@ -202,12 +240,17 @@ export class EnemyManager {
       e.yaw = e.spawn.yaw ?? 0;
       e.time = 0;
       e.laser.mesh.visible = false;
+      e.velocity.set(0, 0, 0);
+      e.shieldFlash = 0;
+      e.beepTimer = 0;
+      if (e.shieldMat) e.shieldMat.opacity = 0.22;
       e.root.position.copy(e.spawn.position);
       e.root.rotation.set(0, e.yaw, 0);
       e.root.updateMatrixWorld(true);
       this.updateCenter(e);
     }
     for (const p of this.projectiles) this.deactivate(p);
+    this.debris.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -367,6 +410,7 @@ export class EnemyManager {
   /** Inflige des dégâts ; renvoie vrai si l'ennemi meurt. Une touche non mortelle interrompt sa visée. */
   damage(e: Enemy, amount: number, hitDir: THREE.Vector3, cause: KillCause = 'melee'): boolean {
     if (!e.alive) return false;
+    if (this.blocks(e, hitDir, cause)) return false;
     e.hp -= amount;
     if (e.hp <= 0) {
       this.kill(e, hitDir, cause);
@@ -381,13 +425,35 @@ export class EnemyManager {
     return false;
   }
 
+  /**
+   * Bouclier : arrête les coups simples (lames, poings, balles) portés de face.
+   * Passent : attaques chargées, séismes, fouet, renvois, grappin, explosions,
+   * coups plongeants et tout ce qui vient de côté ou de dos.
+   */
+  private blocks(e: Enemy, hitDir: THREE.Vector3, cause: KillCause): boolean {
+    if (e.type !== 'shield' || (cause !== 'melee' && cause !== 'shot')) return false;
+    if (hitDir.y < -0.6) return false;
+    const h = Math.hypot(hitDir.x, hitDir.z);
+    if (h < 1e-3) return false;
+    const facing = -(Math.sin(e.yaw) * hitDir.x + Math.cos(e.yaw) * hitDir.z) / h;
+    if (facing < Math.cos(THREE.MathUtils.degToRad(ENEMIES.shield.blockDeg))) return false;
+    e.shieldFlash = 0.35;
+    const point = this.tmp2.copy(e.root.position).add(this.tmp3.set(Math.sin(e.yaw) * 0.6, 1.15, Math.cos(e.yaw) * 0.6));
+    this.particles.sparks(point, this.tmp3.set(Math.sin(e.yaw), 0.2, Math.cos(e.yaw)), 0x40c8ff, 30);
+    this.particles.flash(point, SHIELD_BLUE, 0.3, 1.6, 0.12, 3);
+    this.audio.playShieldHit();
+    this.onBlocked?.(e, point.clone());
+    return true;
+  }
+
   kill(e: Enemy, hitDir: THREE.Vector3, cause: KillCause = 'melee'): void {
     if (!e.alive) return;
     e.alive = false;
     e.root.visible = false;
     e.laser.mesh.visible = false;
     const pos = e.center.clone();
-    this.particles.explosion(pos, e.type === 'guard' ? 0xff2040 : 0xff30d0);
+    this.particles.explosion(pos, this.colorOf(e));
+    this.debris.spawn(pos, hitDir, this.colorOf(e), isHumanoid(e.type) ? 12 : 7);
     this.particles.burst(pos, {
       count: 30,
       color: 0x00e5ff,
@@ -406,6 +472,57 @@ export class EnemyManager {
     });
     this.audio.playExplosion();
     this.onKill?.(e, pos, cause);
+    // Un kamikaze abattu explose quand même… sur ses alliés
+    if (e.type === 'kamikaze') this.blast(pos, null);
+  }
+
+  /** Explosion de kamikaze : détruit les ennemis proches, blesse le joueur s'il est fourni. */
+  private blast(pos: THREE.Vector3, player: PlayerController | null): void {
+    const cfg = ENEMIES.kamikaze;
+    this.particles.explosion(pos, 0xff7a20);
+    this.particles.flash(pos, 0xffa040, 0.5, cfg.blastRadius * 1.3, 0.25, 4);
+    this.particles.burst(pos, {
+      count: 46,
+      color: 0xffa040,
+      color2: 0xff3020,
+      intensity: 5,
+      speedMin: 8,
+      speedMax: 20,
+      lifeMin: 0.25,
+      lifeMax: 0.6,
+      sizeMin: 0.05,
+      sizeMax: 0.12,
+      gravity: 6,
+      drag: 2.5,
+      spread: 1,
+    });
+    this.audio.playExplosion();
+    for (const o of this.enemies) {
+      if (!o.alive) continue;
+      const d = o.center.distanceTo(pos);
+      if (d < cfg.blastRadius) this.kill(o, this.tmp2.subVectors(o.center, pos).normalize(), 'blast');
+    }
+    let hurt = false;
+    if (player && player.alive && this.chest.distanceTo(pos) < cfg.blastRadius) {
+      player.damage(cfg.damage);
+      hurt = true;
+    }
+    this.onBlast?.(pos, hurt);
+  }
+
+  private colorOf(e: Enemy): number {
+    switch (e.type) {
+      case 'drone':
+        return 0xff30d0;
+      case 'sniper':
+        return 0xffa020;
+      case 'shield':
+        return 0x40c8ff;
+      case 'kamikaze':
+        return 0xff7a20;
+      default:
+        return 0xff2040;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -421,24 +538,29 @@ export class EnemyManager {
       this.think(e, dt, player);
     }
     this.updateProjectiles(dt, player);
+    this.debris.update(dt);
   }
 
   private animate(e: Enemy, dt: number, player: PlayerController): void {
+    if (e.type === 'kamikaze') {
+      this.animateKamikaze(e, dt, player);
+      return;
+    }
     const engaged = e.state !== 'idle';
     let targetYaw = e.yaw;
     if (engaged && player.alive) {
       targetYaw = Math.atan2(this.chest.x - e.root.position.x, this.chest.z - e.root.position.z);
-    } else if (e.type === 'guard') {
-      targetYaw = (e.spawn.yaw ?? 0) + Math.sin(e.time * 0.5 + e.phase) * 0.7;
+    } else if (isHumanoid(e.type)) {
+      targetYaw = (e.spawn.yaw ?? 0) + Math.sin(e.time * 0.5 + e.phase) * (e.type === 'sniper' ? 0.35 : 0.7);
     } else {
       targetYaw = e.yaw + dt * 0.6;
     }
     let diff = targetYaw - e.yaw;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    const turn = (e.type === 'guard' ? ENEMIES.guard.turnSpeed : 6) * dt;
+    const turn = (e.type === 'guard' ? ENEMIES.guard.turnSpeed : e.type === 'shield' ? ENEMIES.shield.turnSpeed : e.type === 'sniper' ? ENEMIES.sniper.turnSpeed : 6) * dt;
     e.yaw += THREE.MathUtils.clamp(diff, -turn, turn);
 
-    if (e.type === 'guard') {
+    if (isHumanoid(e.type)) {
       e.root.position.copy(e.spawn.position);
       e.root.rotation.set(0, e.yaw, 0);
       e.body.position.y = Math.sin(e.time * 2 + e.phase) * 0.015;
@@ -463,12 +585,148 @@ export class EnemyManager {
       e.visorMaterial.color.setRGB(4 + k * 6, 0.15 + k * 5, 0.25 + k * 5).multiplyScalar(LIGHTING.enemyGlow);
       if (e.hurtTimer === 0) this.setVisor(e, 4);
     }
+    // Bouclier : éclat bref à chaque coup bloqué
+    if (e.shieldMat) {
+      e.shieldFlash = Math.max(0, e.shieldFlash - dt);
+      e.shieldMat.opacity = 0.22 + e.shieldFlash * 2 + Math.sin(e.time * 7 + e.phase) * 0.03;
+    }
     e.root.updateMatrixWorld(true);
     this.updateCenter(e);
   }
 
+  /** Kamikaze : flotte au repos, tremble en s'armant, puis fonce et explose au contact. */
+  private animateKamikaze(e: Enemy, dt: number, player: PlayerController): void {
+    const cfg = ENEMIES.kamikaze;
+    if (e.state === 'rush') {
+      const speed = e.velocity.length();
+      if (speed > 0.01) {
+        const dir = this.tmp2.copy(e.velocity).divideScalar(speed);
+        const step = speed * dt;
+        const hit = this.physics.raycast(e.root.position, dir, step + 0.35);
+        if (hit) {
+          e.root.position.copy(hit.point).addScaledVector(hit.normal, 0.3);
+          this.detonate(e, player);
+          return;
+        }
+        e.root.position.addScaledVector(dir, step);
+        e.yaw = Math.atan2(dir.x, dir.z);
+      }
+      e.body.rotation.z += dt * 14;
+    } else {
+      e.root.position.set(
+        e.spawn.position.x,
+        e.spawn.position.y + Math.sin(e.time * 2.1 + e.phase) * 0.3,
+        e.spawn.position.z,
+      );
+      if (e.state === 'aiming') {
+        // Armement : tremblement de plus en plus fort
+        const k = 1 - e.timer / cfg.armTime;
+        e.root.position.x += Math.sin(e.time * 80) * 0.05 * k;
+        e.root.position.y += Math.cos(e.time * 70) * 0.05 * k;
+        e.yaw = Math.atan2(this.chest.x - e.root.position.x, this.chest.z - e.root.position.z);
+      } else {
+        e.yaw += dt * 0.8;
+      }
+      e.body.rotation.z = Math.sin(e.time * 1.4 + e.phase) * 0.15;
+    }
+    for (const r of e.rotors) r.rotation.y += dt * 50;
+    e.root.rotation.set(0, e.yaw, 0);
+    // Cœur clignotant, d'autant plus vite que la charge est engagée
+    const rate = e.state === 'rush' ? 22 : e.state === 'aiming' ? 14 : 3;
+    this.setVisor(e, Math.sin(e.time * rate) > 0 ? 9 : 2.5);
+    e.root.updateMatrixWorld(true);
+    this.updateCenter(e);
+  }
+
+  private detonate(e: Enemy, player: PlayerController): void {
+    if (!e.alive) return;
+    e.alive = false;
+    e.root.visible = false;
+    e.laser.mesh.visible = false;
+    this.blast(e.root.position.clone(), player);
+  }
+
+  private thinkKamikaze(e: Enemy, dt: number, player: PlayerController): void {
+    const cfg = ENEMIES.kamikaze;
+    const toPlayer = this.tmp.subVectors(this.chest, e.center);
+    const dist = toPlayer.length();
+    if (e.state === 'rush') {
+      e.timer -= dt;
+      e.beepTimer -= dt;
+      if (e.beepTimer <= 0) {
+        e.beepTimer = THREE.MathUtils.clamp(dist / 40, 0.07, 0.3);
+        this.audio.playKamikazeBeep(1.3, THREE.MathUtils.clamp(1.4 - dist / 30, 0.2, 1));
+      }
+      if ((player.alive && dist < cfg.triggerRadius) || e.timer <= 0) {
+        this.detonate(e, player);
+        return;
+      }
+      // Pilotage : accélère et s'oriente vers le joueur
+      const speed = Math.min(cfg.speed, e.velocity.length() + cfg.accel * dt);
+      if (player.alive && dist > 0.01) {
+        const desired = toPlayer.divideScalar(dist);
+        const cur = this.tmp3.copy(e.velocity).normalize();
+        if (cur.lengthSq() < 0.5) cur.copy(desired);
+        cur.lerp(desired, 1 - Math.exp(-cfg.turnRate * dt)).normalize();
+        e.velocity.copy(cur).multiplyScalar(speed);
+      } else {
+        e.velocity.setLength(speed);
+      }
+      return;
+    }
+    if (dist > ENEMIES.activeDistance || !player.alive) {
+      e.state = 'idle';
+      return;
+    }
+    e.losTimer -= dt;
+    if (e.losTimer <= 0) {
+      e.losTimer = ENEMIES.losCheckInterval;
+      e.hasLineOfSight = false;
+      if (dist < cfg.detectionRange) {
+        const hit = this.physics.raycast(e.center, this.tmp2.copy(toPlayer).divideScalar(dist), dist);
+        e.hasLineOfSight = !hit || hit.distance > dist - 0.4;
+      }
+    }
+    if (e.state === 'idle') {
+      if (e.hasLineOfSight) {
+        e.state = 'aiming';
+        e.timer = cfg.armTime;
+        e.beepTimer = 0;
+      }
+    } else if (e.state === 'aiming') {
+      e.timer -= dt;
+      e.beepTimer -= dt;
+      if (e.beepTimer <= 0) {
+        e.beepTimer = 0.12;
+        this.audio.playKamikazeBeep(1, THREE.MathUtils.clamp(1.4 - dist / 30, 0.2, 1));
+      }
+      if (e.timer <= 0) {
+        e.state = 'rush';
+        e.timer = cfg.fuse;
+        e.velocity.copy(toPlayer).normalize().multiplyScalar(5);
+      }
+    }
+  }
+
+  private cfg(e: Enemy): { detectionRange: number; aimDuration: number; cooldown: number; projectileSpeed: number } {
+    switch (e.type) {
+      case 'guard':
+        return ENEMIES.guard;
+      case 'shield':
+        return ENEMIES.shield;
+      case 'sniper':
+        return ENEMIES.sniper;
+      default:
+        return ENEMIES.drone;
+    }
+  }
+
   private think(e: Enemy, dt: number, player: PlayerController): void {
-    const cfg = e.type === 'guard' ? ENEMIES.guard : ENEMIES.drone;
+    if (e.type === 'kamikaze') {
+      this.thinkKamikaze(e, dt, player);
+      return;
+    }
+    const cfg = this.cfg(e);
     const muzzle = e.muzzle.getWorldPosition(this.tmp2);
     const toPlayer = this.tmp.subVectors(this.chest, muzzle);
     const dist = toPlayer.length();
@@ -497,6 +755,8 @@ export class EnemyManager {
         e.laser.mesh.visible = false;
         if (e.hasLineOfSight) this.beginAim(e, cfg.aimDuration, volume);
         break;
+      case 'rush':
+        break;
       case 'aiming': {
         e.lostTime = e.hasLineOfSight ? 0 : e.lostTime + dt;
         if (e.lostTime > ENEMIES.loseTargetTime) {
@@ -509,7 +769,7 @@ export class EnemyManager {
         e.timer -= dt;
         if (e.timer > ENEMIES.aimLockTime) {
           // Le point visé suit le joueur avec un léger retard + anticipation.
-          const lead = e.type === 'guard' ? 0.45 : 0.6;
+          const lead = e.type === 'sniper' ? 0.3 : isHumanoid(e.type) ? 0.45 : 0.6;
           const travel = dist / cfg.projectileSpeed;
           this.tmp3.copy(this.chest).addScaledVector(player.velocity, travel * lead);
           e.aimPoint.lerp(this.tmp3, 1 - Math.exp(-ENEMIES.aimLagRate * dt));
@@ -520,7 +780,8 @@ export class EnemyManager {
           e.state = 'cooldown';
           e.timer = cfg.cooldown * (0.85 + Math.random() * 0.3);
           e.laser.mesh.visible = false;
-          this.audio.playEnemyShot(volume);
+          if (e.type === 'sniper') this.audio.playSniperShot(Math.max(0.5, volume));
+          else this.audio.playEnemyShot(volume);
         }
         break;
       }
@@ -543,7 +804,8 @@ export class EnemyManager {
     e.aimPoint
       .copy(this.chest)
       .add(this.tmp3.set(Math.random() - 0.5, Math.random() * 0.5 + 0.8, Math.random() - 0.5).multiplyScalar(2.5));
-    this.audio.playEnemyAim(volume);
+    if (e.type === 'sniper') this.audio.playSniperAim(Math.max(0.45, volume));
+    else this.audio.playEnemyAim(volume);
   }
 
   private drawLaser(e: Enemy, muzzle: THREE.Vector3, progress: number): void {
@@ -557,7 +819,8 @@ export class EnemyManager {
     const end = hit ? hit.point : this.tmp.copy(muzzle).addScaledVector(dir, reach);
     const locked = e.timer <= ENEMIES.aimLockTime;
     const blink = locked ? (Math.sin(e.time * 60) > 0 ? 1.6 : 0.6) : 1;
-    e.laser.set(muzzle, end, 0.006 + progress * 0.016);
+    const width = e.type === 'sniper' ? 0.012 + progress * 0.03 : 0.006 + progress * 0.016;
+    e.laser.set(muzzle, end, width);
     e.laser.setIntensity((0.7 + progress * 1.3) * blink);
     e.laser.setOpacity(0.3 + progress * 0.6);
     this.setVisor(e, 4 + progress * 6);
@@ -572,6 +835,7 @@ export class EnemyManager {
     p.owner = null;
     p.homing = null;
     p.homingTarget = null;
+    p.damage = ENEMIES.projectileDamage;
     p.life = ENEMIES.projectileLifetime;
     p.velocity.copy(dir).normalize().multiplyScalar(speed);
     p.group.position.copy(from);
@@ -589,11 +853,12 @@ export class EnemyManager {
     p.owner = e;
     p.homing = null;
     p.homingTarget = null;
+    p.damage = e.type === 'sniper' ? ENEMIES.sniper.damage : ENEMIES.projectileDamage;
     p.life = ENEMIES.projectileLifetime;
     p.velocity.copy(dir).multiplyScalar(speed);
     p.group.position.copy(muzzle);
     p.group.visible = true;
-    const color = e.type === 'guard' ? GUARD_RED : DRONE_MAGENTA;
+    const color = e.type === 'sniper' ? SNIPER_AMBER : e.type === 'drone' ? DRONE_MAGENTA : GUARD_RED;
     p.coreMaterial.color.copy(color).multiplyScalar(6 * LIGHTING.enemyGlow);
     p.glowMaterial.color.copy(color).multiplyScalar(2.2 * LIGHTING.enemyGlow);
     this.particles.flash(muzzle, color, 0.2, 1.2, 0.12, 4);
@@ -634,7 +899,7 @@ export class EnemyManager {
         // Projectile renvoyé : il détruit les ennemis qu'il touche.
         for (const e of this.enemies) {
           if (!e.alive) continue;
-          if (segmentPointDistance(start, p.group.position, e.center) < (e.type === 'guard' ? 0.8 : 0.7)) {
+          if (segmentPointDistance(start, p.group.position, e.center) < (isHumanoid(e.type) ? 0.8 : 0.7)) {
             this.kill(e, dir, 'deflect');
             this.deactivate(p);
             break;
@@ -655,7 +920,7 @@ export class EnemyManager {
       } else if (player.alive) {
         const d = segmentSegmentDistance(start, p.group.position, this.segA, this.segB);
         if (d < radius) {
-          player.damage(ENEMIES.projectileDamage);
+          player.damage(p.damage);
           this.particles.sparks(p.group.position, null, 0xff3040, 30);
           this.deactivate(p);
           continue;
@@ -679,12 +944,13 @@ export class EnemyManager {
   // ---------------------------------------------------------------------------
 
   private updateCenter(e: Enemy): void {
-    if (e.type === 'guard') e.center.copy(e.root.position).add(this.tmp3.set(0, 1.15, 0));
+    if (isHumanoid(e.type)) e.center.copy(e.root.position).add(this.tmp3.set(0, 1.15, 0));
     else e.center.copy(e.root.position);
   }
 
   private hitSpheres(e: Enemy): { center: THREE.Vector3; radius: number }[] {
     if (e.type === 'drone') return [{ center: e.center, radius: 0.6 }];
+    if (e.type === 'kamikaze') return [{ center: e.center, radius: 0.5 }];
     const base = e.root.position;
     return [
       { center: new THREE.Vector3(base.x, base.y + 0.55, base.z), radius: 0.42 },
@@ -695,9 +961,9 @@ export class EnemyManager {
 
   /** Écrit dans `out` le point de l'ennemi le plus proche de `p` et renvoie le rayon de la zone. */
   private closestPointOnEnemy(e: Enemy, p: THREE.Vector3, out: THREE.Vector3): number {
-    if (e.type === 'drone') {
+    if (!isHumanoid(e.type)) {
       out.copy(e.center);
-      return 0.6;
+      return e.type === 'kamikaze' ? 0.5 : 0.6;
     }
     const base = e.root.position;
     out.set(base.x, THREE.MathUtils.clamp(p.y, base.y + 0.4, base.y + 1.75), base.z);
@@ -710,7 +976,10 @@ export class EnemyManager {
 
   /** Visière rouge : `level` ≈ 4 au repos, jusqu'à 10 juste avant le tir. */
   private setVisor(e: Enemy, level: number): void {
-    e.visorMaterial.color.setRGB(level, 0.15, 0.25).multiplyScalar(LIGHTING.enemyGlow);
+    if (e.type === 'sniper') e.visorMaterial.color.setRGB(level, level * 0.55, 0.1);
+    else if (e.type === 'kamikaze') e.visorMaterial.color.setRGB(level, level * 0.3, 0.05);
+    else e.visorMaterial.color.setRGB(level, 0.15, 0.25);
+    e.visorMaterial.color.multiplyScalar(LIGHTING.enemyGlow);
   }
 
   private createVisorMaterial(): THREE.MeshBasicMaterial {
@@ -728,6 +997,9 @@ export class EnemyManager {
     const body = new THREE.Group();
     root.add(body);
     const visor = this.createVisorMaterial();
+    const sniper = spawn.type === 'sniper';
+    const shielded = spawn.type === 'shield';
+    const accent = sniper ? this.accentAmberMat : this.accentRedMat;
 
     // Jambes et bassin
     body.add(this.box(0.2, 0.9, 0.22, this.clothMat, -0.14, 0.45, 0));
@@ -735,63 +1007,127 @@ export class EnemyManager {
     body.add(this.box(0.22, 0.28, 0.26, this.armorMat, -0.14, 0.42, 0.03));
     body.add(this.box(0.22, 0.28, 0.26, this.armorMat, 0.14, 0.42, 0.03));
     body.add(this.box(0.48, 0.2, 0.28, this.armorMat, 0, 0.98, 0));
-    // Torse
-    body.add(this.box(0.58, 0.62, 0.34, this.armorMat, 0, 1.36, 0));
-    body.add(this.box(0.42, 0.04, 0.02, this.accentRedMat, 0, 1.44, 0.18));
-    body.add(this.box(0.04, 0.3, 0.02, this.accentRedMat, 0, 1.24, 0.18));
+    // Torse (plus massif pour le garde à bouclier)
+    const bulk = shielded ? 1.15 : 1;
+    body.add(this.box(0.58 * bulk, 0.62, 0.34 * bulk, this.armorMat, 0, 1.36, 0));
+    body.add(this.box(0.42, 0.04, 0.02, accent, 0, 1.44, 0.18 * bulk));
+    body.add(this.box(0.04, 0.3, 0.02, accent, 0, 1.24, 0.18 * bulk));
     body.add(this.box(0.36, 0.42, 0.18, this.clothMat, 0, 1.36, -0.25));
-    body.add(this.box(0.06, 0.06, 0.02, this.accentRedMat, 0.1, 1.5, -0.35));
+    body.add(this.box(0.06, 0.06, 0.02, accent, 0.1, 1.5, -0.35));
     // Épaules
-    body.add(this.box(0.22, 0.17, 0.32, this.armorMat, -0.39, 1.6, 0));
-    body.add(this.box(0.22, 0.17, 0.32, this.armorMat, 0.39, 1.6, 0));
-    // Tête + visière rouge
+    body.add(this.box(0.22 * bulk, 0.17 * bulk, 0.32, this.armorMat, -0.39 * bulk, 1.6, 0));
+    body.add(this.box(0.22 * bulk, 0.17 * bulk, 0.32, this.armorMat, 0.39 * bulk, 1.6, 0));
+    // Tête + visière
     body.add(this.box(0.27, 0.3, 0.29, this.armorMat, 0, 1.84, 0));
-    const visorMesh = this.box(0.29, 0.075, 0.05, visor, 0, 1.87, 0.14);
+    const visorMesh = this.box(sniper ? 0.12 : 0.29, 0.075, 0.05, visor, sniper ? 0.06 : 0, 1.87, 0.14);
     body.add(visorMesh);
     body.add(this.box(0.02, 0.22, 0.02, this.armorMat, 0.11, 2.05, -0.06));
-    body.add(this.box(0.03, 0.03, 0.03, this.accentRedMat, 0.11, 2.17, -0.06));
+    body.add(this.box(0.03, 0.03, 0.03, accent, 0.11, 2.17, -0.06));
+    if (sniper) {
+      // Capuche / cape du tireur d'élite
+      body.add(this.box(0.36, 0.16, 0.36, this.clothMat, 0, 2.0, -0.02));
+      body.add(this.box(0.5, 0.9, 0.06, this.clothMat, 0, 1.3, -0.32));
+    }
 
-    // Bras tendus vers l'avant qui tiennent le fusil
+    // Bras tendus vers l'avant qui tiennent l'arme
     const armGeo = new THREE.BoxGeometry(0.12, 0.5, 0.13);
     armGeo.translate(0, -0.25, 0);
     for (const side of [-1, 1]) {
       const arm = new THREE.Mesh(armGeo, this.armorMat);
-      arm.position.set(side * 0.38, 1.55, 0.02);
+      arm.position.set(side * 0.38 * bulk, 1.55, 0.02);
       arm.rotation.set(-1.15, 0, side * -0.35);
       body.add(arm);
     }
 
-    // Fusil
-    const rifle = new THREE.Group();
-    rifle.position.set(0.06, 1.3, 0.42);
-    rifle.add(this.box(0.08, 0.13, 0.72, this.armorMat, 0, 0, 0));
-    rifle.add(this.box(0.05, 0.16, 0.08, this.clothMat, 0, -0.12, -0.12));
-    rifle.add(this.box(0.085, 0.025, 0.5, this.accentRedMat, 0, 0.07, 0.02));
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.25, 8), this.armorMat);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.02, 0.46);
-    rifle.add(barrel);
     const muzzle = new THREE.Object3D();
-    muzzle.position.set(0, 0.02, 0.6);
-    rifle.add(muzzle);
-    body.add(rifle);
+    let shieldMat: THREE.MeshBasicMaterial | null = null;
+    if (shielded) {
+      // Pistolet dans la main droite
+      const gun = new THREE.Group();
+      gun.position.set(0.34, 1.32, 0.46);
+      gun.add(this.box(0.07, 0.11, 0.34, this.armorMat, 0, 0, 0));
+      gun.add(this.box(0.075, 0.02, 0.26, accent, 0, 0.06, 0.02));
+      muzzle.position.set(0, 0.02, 0.2);
+      gun.add(muzzle);
+      body.add(gun);
+      // Bouclier holographique (bras gauche) : panneau translucide + cadre lumineux
+      shieldMat = new THREE.MeshBasicMaterial({
+        color: SHIELD_BLUE.clone().multiplyScalar(1.6),
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      });
+      const shield = new THREE.Group();
+      shield.position.set(-0.12, 1.12, 0.62);
+      shield.rotation.y = 0.12;
+      shield.add(new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.45, 0.03), shieldMat));
+      shield.add(this.box(0.99, 0.05, 0.05, this.accentBlueMat, 0, 0.72, 0));
+      shield.add(this.box(0.99, 0.05, 0.05, this.accentBlueMat, 0, -0.72, 0));
+      shield.add(this.box(0.05, 1.45, 0.05, this.accentBlueMat, -0.48, 0, 0));
+      shield.add(this.box(0.05, 1.45, 0.05, this.accentBlueMat, 0.48, 0, 0));
+      shield.add(this.box(0.7, 0.03, 0.04, this.accentBlueMat, 0, 0.25, 0));
+      shield.add(this.box(0.03, 0.4, 0.04, this.accentBlueMat, 0, -0.05, 0));
+      shield.add(this.box(0.12, 0.3, 0.12, this.armorMat, 0.1, 0, -0.08));
+      body.add(shield);
+    } else {
+      // Fusil (long canon et lunette pour le tireur d'élite)
+      const len = sniper ? 1.25 : 0.72;
+      const rifle = new THREE.Group();
+      rifle.position.set(0.06, 1.3, 0.42 + (sniper ? 0.2 : 0));
+      rifle.add(this.box(0.08, 0.13, len, this.armorMat, 0, 0, 0));
+      rifle.add(this.box(0.05, 0.16, 0.08, this.clothMat, 0, -0.12, -0.12));
+      rifle.add(this.box(0.085, 0.025, len * 0.7, accent, 0, 0.07, 0.02));
+      const barrelLen = sniper ? 0.6 : 0.25;
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, barrelLen, 8), this.armorMat);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(0, 0.02, len / 2 + barrelLen / 2 - 0.02);
+      rifle.add(barrel);
+      if (sniper) {
+        const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.36, 10), this.armorMat);
+        scope.rotation.x = Math.PI / 2;
+        scope.position.set(0, 0.14, 0.05);
+        rifle.add(scope);
+        rifle.add(this.box(0.06, 0.06, 0.02, accent, 0, 0.14, 0.24));
+        // Bipied replié
+        rifle.add(this.box(0.02, 0.24, 0.02, this.armorMat, -0.05, -0.12, len / 2 - 0.1));
+        rifle.add(this.box(0.02, 0.24, 0.02, this.armorMat, 0.05, -0.12, len / 2 - 0.1));
+      }
+      muzzle.position.set(0, 0.02, len / 2 + barrelLen - 0.02);
+      rifle.add(muzzle);
+      body.add(rifle);
+    }
     bakeGroup(body, [muzzle]);
 
-    const laser = new Beam(0xff1030, 3 * LIGHTING.enemyGlow);
+    const laser = new Beam(sniper ? 0xffa020 : 0xff1030, (sniper ? 3.6 : 3) * LIGHTING.enemyGlow);
+    return this.enemyRecord(spawn, root, body, muzzle, visor, laser, [], shieldMat);
+  }
 
+  private enemyRecord(
+    spawn: EnemySpawn,
+    root: THREE.Group,
+    body: THREE.Group,
+    muzzle: THREE.Object3D,
+    visorMaterial: THREE.MeshBasicMaterial,
+    laser: Beam,
+    rotors: THREE.Object3D[],
+    shieldMat: THREE.MeshBasicMaterial | null,
+  ): Enemy {
     return {
-      type: 'guard',
+      type: spawn.type,
       spawn,
       root,
       body,
       muzzle,
-      visorMaterial: visor,
+      visorMaterial,
       laser,
-      rotors: [],
+      rotors,
       aimPoint: new THREE.Vector3(),
       center: new THREE.Vector3(),
       alive: true,
-      hp: ENEMIES.health,
+      hp: spawn.type === 'kamikaze' ? 1 : ENEMIES.health,
       hurtTimer: 0,
       state: 'idle',
       timer: 0,
@@ -801,6 +1137,10 @@ export class EnemyManager {
       yaw: spawn.yaw ?? 0,
       phase: Math.random() * Math.PI * 2,
       time: 0,
+      velocity: new THREE.Vector3(),
+      shieldMat,
+      shieldFlash: 0,
+      beepTimer: 0,
     };
   }
 
@@ -809,30 +1149,59 @@ export class EnemyManager {
     const body = new THREE.Group();
     root.add(body);
     const visor = this.createVisorMaterial();
+    const kamikaze = spawn.type === 'kamikaze';
+    const accent = kamikaze ? this.accentAmberMat : this.accentMagentaMat;
 
-    const hull = new THREE.Mesh(new THREE.SphereGeometry(0.38, 18, 12), this.armorMat);
-    hull.scale.set(1, 0.5, 1.15);
+    const hull = new THREE.Mesh(new THREE.SphereGeometry(kamikaze ? 0.3 : 0.38, 18, 12), this.armorMat);
+    hull.scale.set(1, kamikaze ? 0.8 : 0.5, kamikaze ? 1 : 1.15);
     body.add(hull);
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), visor);
-    eye.position.set(0, 0.02, 0.4);
-    body.add(eye);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.022, 6, 32), this.accentMagentaMat);
-    ring.rotation.x = Math.PI / 2;
-    body.add(ring);
-    body.add(this.box(0.12, 0.12, 0.3, this.armorMat, 0, -0.18, 0.15));
+    if (kamikaze) {
+      // Charge explosive : cœur lumineux et pointes
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), visor);
+      core.position.set(0, 0, 0.22);
+      body.add(core);
+      const spikeGeo = new THREE.ConeGeometry(0.06, 0.26, 6);
+      const dirs: [number, number, number][] = [
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0.7, 0.7, -0.3],
+        [-0.7, 0.7, -0.3],
+        [0.7, -0.7, -0.3],
+        [-0.7, -0.7, -0.3],
+      ];
+      for (const [x, y, z] of dirs) {
+        const spike = new THREE.Mesh(spikeGeo, accent);
+        const d = new THREE.Vector3(x, y, z).normalize();
+        spike.position.copy(d).multiplyScalar(0.33);
+        spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+        body.add(spike);
+      }
+      body.add(this.box(0.5, 0.05, 0.05, accent, 0, 0, -0.1));
+    } else {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), visor);
+      eye.position.set(0, 0.02, 0.4);
+      body.add(eye);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.022, 6, 32), accent);
+      ring.rotation.x = Math.PI / 2;
+      body.add(ring);
+      body.add(this.box(0.12, 0.12, 0.3, this.armorMat, 0, -0.18, 0.15));
+    }
 
     const rotors: THREE.Object3D[] = [];
-    const rotorGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.012, 16);
+    const reach = kamikaze ? 0.46 : 0.62;
+    const rotorGeo = new THREE.CylinderGeometry(kamikaze ? 0.15 : 0.2, kamikaze ? 0.15 : 0.2, 0.012, 16);
     for (let i = 0; i < 4; i++) {
       const a = Math.PI / 4 + (i * Math.PI) / 2;
-      const arm = this.box(0.05, 0.04, 0.42, this.armorMat, Math.sin(a) * 0.4, 0.04, Math.cos(a) * 0.4);
+      const arm = this.box(0.05, 0.04, reach * 0.68, this.armorMat, Math.sin(a) * reach * 0.64, 0.04, Math.cos(a) * reach * 0.64);
       arm.rotation.y = a;
       body.add(arm);
       const rotor = new THREE.Mesh(rotorGeo, this.rotorMat);
-      rotor.position.set(Math.sin(a) * 0.62, 0.08, Math.cos(a) * 0.62);
+      rotor.position.set(Math.sin(a) * reach, 0.08, Math.cos(a) * reach);
       body.add(rotor);
       rotors.push(rotor);
-      const light = this.box(0.04, 0.04, 0.04, this.accentMagentaMat, Math.sin(a) * 0.62, 0.0, Math.cos(a) * 0.62);
+      const light = this.box(0.04, 0.04, 0.04, accent, Math.sin(a) * reach, 0.0, Math.cos(a) * reach);
       body.add(light);
     }
 
@@ -842,30 +1211,7 @@ export class EnemyManager {
     bakeGroup(body, [muzzle, ...rotors]);
 
     const laser = new Beam(0xff20b0, 3 * LIGHTING.enemyGlow);
-
-    return {
-      type: 'drone',
-      spawn,
-      root,
-      body,
-      muzzle,
-      visorMaterial: visor,
-      laser,
-      rotors,
-      aimPoint: new THREE.Vector3(),
-      center: new THREE.Vector3(),
-      alive: true,
-      hp: ENEMIES.health,
-      hurtTimer: 0,
-      state: 'idle',
-      timer: 0,
-      losTimer: 0,
-      hasLineOfSight: false,
-      lostTime: 0,
-      yaw: spawn.yaw ?? 0,
-      phase: Math.random() * Math.PI * 2,
-      time: 0,
-    };
+    return this.enemyRecord(spawn, root, body, muzzle, visor, laser, rotors, null);
   }
 
   private createProjectile(): Projectile {
@@ -897,6 +1243,7 @@ export class EnemyManager {
       active: false,
       friendly: false,
       life: 0,
+      damage: 1,
     };
   }
 }

@@ -122,6 +122,8 @@ export class HUD {
   private readonly hitmarker: HTMLDivElement;
   private readonly chargeRing: HTMLDivElement;
   private readonly chargeLabel: HTMLDivElement;
+  private readonly grappleMark: HTMLDivElement;
+  private grappleShown = false;
   private lastCharge = -1;
   private readonly sandFill: HTMLDivElement;
   private readonly sandLabel: HTMLDivElement;
@@ -180,6 +182,9 @@ export class HUD {
     el('span', 'dot', this.crosshair);
     this.chargeRing = el('div', 'charge-ring', this.root);
     this.chargeLabel = el('div', 'charge-label', this.root, 'RELÂCHE !');
+    this.grappleMark = el('div', 'grapple-mark', this.root);
+    el('span', 'gm-box', this.grappleMark);
+    if (!touch) el('span', 'gm-key', this.grappleMark, 'F');
     this.hitmarker = el('div', 'hitmarker', this.root);
     for (let i = 0; i < 4; i++) el('span', `hm h${i}`, this.hitmarker);
 
@@ -487,6 +492,22 @@ export class HUD {
     this.chargeRing.style.setProperty('--charge', String(ready ? 100 : Math.max(0, q)));
   }
 
+  /**
+   * Repère du grappin (coordonnées écran en px, null = aucune cible).
+   * `enemy` : cible vivante (rouge) plutôt qu'une ancre (cyan).
+   */
+  setGrappleTarget(x: number | null, y = 0, enemy = false): void {
+    if (x === null) {
+      if (this.grappleShown) this.grappleMark.classList.remove('show');
+      this.grappleShown = false;
+      return;
+    }
+    if (!this.grappleShown) this.grappleMark.classList.add('show');
+    this.grappleShown = true;
+    this.grappleMark.classList.toggle('enemy', enemy);
+    this.grappleMark.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  }
+
   hitMarker(): void {
     this.hitmarker.classList.remove('show');
     void this.hitmarker.offsetWidth;
@@ -521,7 +542,7 @@ export class HUD {
       : `<div class="quick-keys">
           <span><kbd>ZQSD</kbd> courir</span><span><kbd>ESPACE</kbd> saut</span><span><kbd>C</kbd> glisse</span>
           <span><kbd>SHIFT</kbd> dash</span><span><kbd>CLIC G</kbd> attaque · maintenir : chargée</span>
-          <span><kbd>CLIC D</kbd> sandevistan</span><span><kbd>R</kbd> recommencer</span>
+          <span><kbd>CLIC D</kbd> sandevistan</span><span><kbd>F</kbd> grappin</span><span><kbd>R</kbd> recommencer</span>
         </div>`;
     const cards = levels
       .map((l, i) => {
@@ -533,7 +554,7 @@ export class HUD {
             <span class="lc-name">${l.name}</span>
             <span class="lc-sub">${l.subtitle}</span>
             <span class="lc-foot"><span class="lc-diff" aria-label="Difficulté ${l.difficulty} sur 4">${pips}</span>
-            <span class="lc-best">${l.rank ? `<b class="lc-rank r-${l.rank}">${l.rank}</b>` : ''}${l.best !== null ? `<span class="medal ${l.medal ?? 'none'}">★</span> ${HUD.formatTime(l.best)}` : 'NON TERMINÉ'}</span></span>
+            <span class="lc-best">${l.rank ? `<b class="lc-rank r-${l.rank}">${l.rank}</b>` : ''}${l.best !== null ? `<span class="medal ${l.medal ?? 'none'}">★</span> ${HUD.formatTime(l.best)}` : 'NOUVEAU'}</span></span>
           </button>`;
       })
       .join('');
@@ -542,7 +563,7 @@ export class HUD {
     this.overlay.innerHTML = `
       <div class="panel">
         <div class="title" data-text="NEON VERTIGO">NEON VERTIGO</div>
-        <div class="subtitle">PROTOTYPE // PARKOUR · LAMES · SANDEVISTAN</div>
+        <div class="subtitle">PARKOUR · LAMES · GRAPPIN · SANDEVISTAN</div>
         <div class="pick">CHOISIS TON PARCOURS</div>
         <div class="level-grid">${cards}</div>
         ${quickKeys}
