@@ -7,6 +7,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { CAMERA, GRAPHICS, LIGHTING, WORLD } from '../config';
 import { QUALITY } from './Device';
+import type { ThemeDef } from '../world/levels';
 
 /** Shader final : aberration chromatique, vignette, teinte Sandevistan, dégâts, mort, grain. */
 const CyberFxShader = {
@@ -107,7 +108,18 @@ export class Engine {
   private readonly afterimagePass: AfterimagePass;
   private readonly fxPass: ShaderPass;
   private readonly container: HTMLElement;
+  private skyMaterial: THREE.ShaderMaterial | null = null;
   private elapsed = 0;
+  /** Éclair d'orage : appelé avec le délai (s) avant le tonnerre. */
+  onLightning: ((thunderDelay: number) => void) | null = null;
+  private hemiLight!: THREE.HemisphereLight;
+  private keyLight!: THREE.DirectionalLight;
+  private storm = false;
+  private nextStrike = 4;
+  private readonly strikeTimes: number[] = [];
+  private flash = 0;
+  private readonly fogBase = new THREE.Color(WORLD.fogColor);
+  private readonly flashColor = new THREE.Color(0x8a80b8);
   // Résolution dynamique
   private pixelRatio: number;
   private frameAccum = 0;
@@ -209,8 +221,38 @@ export class Engine {
     this.fxPass.uniforms.uAspect.value = w / h;
   }
 
+  /** Orage : éclairs espacés (double flash) qui illuminent ciel, brouillard et décor. */
+  private updateWeather(dt: number): void {
+    if (this.storm) {
+      this.nextStrike -= dt;
+      if (this.nextStrike <= 0) {
+        this.nextStrike = 6 + Math.random() * 7;
+        this.strikeTimes.push(this.elapsed, this.elapsed + 0.12 + Math.random() * 0.1);
+        this.onLightning?.(0.4 + Math.random() * 1.1);
+      }
+    }
+    for (let i = this.strikeTimes.length - 1; i >= 0; i--) {
+      if (this.elapsed >= this.strikeTimes[i]) {
+        this.flash = Math.max(this.flash, 0.75 + Math.random() * 0.25);
+        this.strikeTimes.splice(i, 1);
+      }
+    }
+    if (this.flash > 0) {
+      this.flash = Math.max(0, this.flash - dt * 5.5);
+      this.applyFlash();
+    }
+  }
+
+  private applyFlash(): void {
+    const k = this.flash * LIGHTING.effects;
+    this.hemiLight.intensity = 1.1 + k * 1.8;
+    (this.scene.fog as THREE.FogExp2).color.copy(this.fogBase).lerp(this.flashColor, k * 0.35);
+    if (this.skyMaterial) this.skyMaterial.uniforms.uFlash.value = k;
+  }
+
   render(realDt: number): void {
     this.elapsed += realDt;
+    this.updateWeather(realDt);
     this.fxPass.uniforms.uTime.value = this.elapsed;
     this.composer.render(realDt);
     this.adaptResolution(realDt);
@@ -281,7 +323,8 @@ export class Engine {
 
   private setupLights(): void {
     // Ciel violet au-dessus, rebond orangé des rues en dessous
-    this.scene.add(new THREE.HemisphereLight(0x4a3a7a, 0x4a2a14, 1.1));
+    this.hemiLight = new THREE.HemisphereLight(0x4a3a7a, 0x4a2a14, 1.1);
+    this.scene.add(this.hemiLight);
     this.scene.add(new THREE.AmbientLight(0x2a1c30, 0.55));
 
     const moon = new THREE.DirectionalLight(0x9fb4ff, 0.5);
@@ -292,6 +335,7 @@ export class Engine {
     const sodium = new THREE.DirectionalLight(0xff8a3c, 0.5);
     sodium.position.set(-70, 12, -40);
     this.scene.add(sodium);
+    this.keyLight = sodium;
 
     // …et néons froids / roses de l'autre
     const cyanFill = new THREE.DirectionalLight(0x2bd9c5, 0.3);
@@ -301,6 +345,28 @@ export class Engine {
     const pinkFill = new THREE.DirectionalLight(0xff4fa3, 0.22);
     pinkFill.position.set(60, 15, 80);
     this.scene.add(pinkFill);
+  }
+
+  /** Ambiance d'un niveau : brouillard, ciel et couleur de fond. */
+  setTheme(theme: ThemeDef): void {
+    (this.scene.background as THREE.Color).setHex(theme.fog);
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.setHex(theme.fog);
+    fog.density = theme.fogDensity;
+    this.fogBase.setHex(theme.fog);
+    this.hemiLight.color.setHex(theme.ambient);
+    this.keyLight.color.setHex(theme.key);
+    this.storm = theme.storm === true;
+    this.nextStrike = 3 + Math.random() * 3;
+    this.strikeTimes.length = 0;
+    this.flash = 0;
+    this.applyFlash();
+    if (this.skyMaterial) {
+      const u = this.skyMaterial.uniforms;
+      (u.uHorizon.value as THREE.Color).setHex(theme.skyHorizon);
+      (u.uGlow.value as THREE.Color).setHex(theme.skyGlow);
+      (u.uWarm.value as THREE.Color).setHex(theme.skyWarm);
+    }
   }
 
   private createSky(): void {
@@ -314,6 +380,7 @@ export class Engine {
         uGlow: { value: new THREE.Color(0xff3a8a) },
         uWarm: { value: new THREE.Color(0xff7a30) },
         uZenith: { value: new THREE.Color(0x03030c) },
+        uFlash: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec3 vDir;
@@ -328,6 +395,7 @@ export class Engine {
         uniform vec3 uGlow;
         uniform vec3 uWarm;
         uniform vec3 uZenith;
+        uniform float uFlash;
         varying vec3 vDir;
         float hash(vec3 p) { return fract(sin(dot(p, vec3(17.1, 31.7, 11.3))) * 43758.5453); }
         void main() {
@@ -343,10 +411,12 @@ export class Engine {
           // Quelques étoiles perçant la pollution lumineuse
           float s = step(0.9985, hash(floor(vDir * 300.0)));
           col += vec3(s) * smoothstep(0.25, 0.6, h) * 0.6;
+          col += vec3(0.55, 0.5, 0.85) * uFlash * (0.25 + 0.75 * smoothstep(-0.05, 0.45, h));
           gl_FragColor = vec4(col, 1.0);
         }
       `,
     });
+    this.skyMaterial = mat;
     const sky = new THREE.Mesh(geo, mat);
     sky.frustumCulled = false;
     sky.renderOrder = -1;

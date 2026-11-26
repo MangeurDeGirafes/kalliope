@@ -1,9 +1,10 @@
 import type { WeaponId } from '../weapons/WeaponManager';
+import type { Reward } from '../progress/Progress';
 
 export interface HudState {
   time: number;
-  kills: number;
-  totalEnemies: number;
+  /** Ligne sous le chrono (cibles en niveau, chats trouvés à la Plaza). */
+  targetsText: string;
   sandevistan: number;
   sandevistanActive: boolean;
   dashCharges: number;
@@ -20,6 +21,16 @@ export interface FinishStats {
   isRecord: boolean;
   kills: number;
   totalEnemies: number;
+}
+
+/** Carte de sélection de niveau sur l'écran titre. */
+export interface LevelCard {
+  name: string;
+  subtitle: string;
+  difficulty: number;
+  best: number | null;
+  /** Couleur d'accent (ciel du niveau). */
+  accent: number;
 }
 
 const WEAPON_LABELS: Record<WeaponId, string> = {
@@ -43,8 +54,17 @@ export class HUD {
   onRestartClick: (() => void) | null = null;
   /** Appelé par le bouton « Tutoriel » de l'écran titre. */
   onTutorialClick: (() => void) | null = null;
+  /** Appelé quand une carte de niveau est choisie (index). */
+  onLevelSelect: ((index: number) => void) | null = null;
+  /** Appelé par « Niveau suivant » sur l'écran d'arrivée. */
+  onNextClick: (() => void) | null = null;
+  /** Appelé par « Menu » (pause, mort, arrivée). */
+  onMenuClick: (() => void) | null = null;
+  /** Appelé par le bouton « La Plaza » de l'écran titre. */
+  onPlazaClick: (() => void) | null = null;
 
   private readonly root: HTMLDivElement;
+  private readonly levelLabel: HTMLDivElement;
   private readonly timer: HTMLDivElement;
   private readonly targets: HTMLDivElement;
   private readonly crosshair: HTMLDivElement;
@@ -56,6 +76,14 @@ export class HUD {
   private readonly sandLabel: HTMLDivElement;
   private readonly dashPips: HTMLSpanElement[] = [];
   private readonly healthPips: HTMLSpanElement[] = [];
+  private readonly dashBox: HTMLDivElement;
+  private readonly hpBox: HTMLDivElement;
+  private readonly credits: HTMLDivElement;
+  private readonly prompt: HTMLDivElement;
+  private readonly dialogue: HTMLDivElement;
+  private dialogueTimer: number | null = null;
+  private lastCredits = -1;
+  private lastTargets = '';
   private readonly weaponSlots = new Map<WeaponId, HTMLDivElement>();
   private readonly speed: HTMLDivElement;
   private readonly message: HTMLDivElement;
@@ -73,8 +101,10 @@ export class HUD {
     this.root = el('div', 'hud hidden', container);
 
     const top = el('div', 'hud-top', this.root);
+    this.levelLabel = el('div', 'hud-level', top);
     this.timer = el('div', 'hud-timer', top, '00:00.00');
     this.targets = el('div', 'hud-targets', top, 'CIBLES 0/0');
+    this.credits = el('div', 'hud-credits', top, '0 ¢');
 
     this.crosshair = el('div', 'crosshair blades', this.root);
     for (let i = 0; i < 4; i++) el('span', `tick t${i}`, this.crosshair);
@@ -90,12 +120,12 @@ export class HUD {
     this.sandFill = el('div', 'fill', bar);
     const dashRow = el('div', 'row', left);
     el('div', 'label', dashRow, 'DASH');
-    const dashBox = el('div', 'pips dash', dashRow);
-    for (let i = 0; i < dashMax; i++) this.dashPips.push(el('span', 'pip', dashBox));
+    this.dashBox = el('div', 'pips dash', dashRow);
+    for (let i = 0; i < dashMax; i++) this.dashPips.push(el('span', 'pip', this.dashBox));
     const hpRow = el('div', 'row', left);
     el('div', 'label', hpRow, 'INTÉGRITÉ');
-    const hpBox = el('div', 'pips health', hpRow);
-    for (let i = 0; i < maxHealth; i++) this.healthPips.push(el('span', 'pip', hpBox));
+    this.hpBox = el('div', 'pips health', hpRow);
+    for (let i = 0; i < maxHealth; i++) this.healthPips.push(el('span', 'pip', this.hpBox));
 
     const right = el('div', 'hud-right', this.root);
     (['blades', 'pistol'] as WeaponId[]).forEach((id, i) => {
@@ -107,6 +137,8 @@ export class HUD {
     this.speed = el('div', 'hud-speed', right, '0 KM/H');
 
     this.message = el('div', 'hud-message', this.root);
+    this.prompt = el('div', 'hud-prompt', this.root);
+    this.dialogue = el('div', 'hud-dialogue', this.root);
     el('div', 'hud-hint', this.root, 'R : RECOMMENCER · ÉCHAP : PAUSE');
 
     this.overlay = el('div', 'overlay', container);
@@ -122,6 +154,27 @@ export class HUD {
       if (target?.closest('[data-act="tutorial"]')) {
         e.stopPropagation();
         this.onTutorialClick?.();
+        return;
+      }
+      const card = target?.closest<HTMLElement>('[data-act="level"]');
+      if (card) {
+        e.stopPropagation();
+        this.onLevelSelect?.(Number(card.dataset.level));
+        return;
+      }
+      if (target?.closest('[data-act="next"]')) {
+        e.stopPropagation();
+        this.onNextClick?.();
+        return;
+      }
+      if (target?.closest('[data-act="menu"]')) {
+        e.stopPropagation();
+        this.onMenuClick?.();
+        return;
+      }
+      if (target?.closest('[data-act="plaza"]')) {
+        e.stopPropagation();
+        this.onPlazaClick?.();
         return;
       }
       this.onOverlayClick?.();
@@ -155,7 +208,13 @@ export class HUD {
       this.timer.textContent = t;
       this.lastTimerText = t;
     }
-    this.targets.textContent = `CIBLES ${s.kills}/${s.totalEnemies}`;
+    if (s.targetsText !== this.lastTargets) {
+      this.targets.textContent = s.targetsText;
+      this.lastTargets = s.targetsText;
+    }
+    // Améliorations achetées : nombre de charges / points d'intégrité variable
+    this.syncPips(this.dashPips, this.dashBox, s.dashMax);
+    this.syncPips(this.healthPips, this.hpBox, s.maxHealth);
     this.sandFill.style.width = `${Math.round(s.sandevistan * 100)}%`;
     this.root.classList.toggle('sandevistan', s.sandevistanActive);
     this.sandLabel.textContent = s.sandevistanActive ? 'SANDEVISTAN // ACTIF' : 'SANDEVISTAN';
@@ -166,6 +225,55 @@ export class HUD {
     this.healthPips.forEach((p, i) => p.classList.toggle('full', i < s.health));
     this.root.classList.toggle('critical', s.health <= 1);
     this.speed.textContent = `${Math.round(s.speed * 3.6)} KM/H`;
+  }
+
+  private syncPips(pips: HTMLSpanElement[], box: HTMLDivElement, count: number): void {
+    while (pips.length < count) pips.push(el('span', 'pip', box));
+    while (pips.length > count) pips.pop()!.remove();
+  }
+
+  /** Niveau (chrono, cibles) ou Plaza (exploration libre, crédits mis en avant). */
+  setMode(mode: 'level' | 'plaza'): void {
+    this.root.classList.toggle('plaza', mode === 'plaza');
+    if (mode === 'level') this.setPrompt(null);
+  }
+
+  setCredits(amount: number): void {
+    if (amount === this.lastCredits) return;
+    const gained = this.lastCredits >= 0 && amount > this.lastCredits;
+    this.lastCredits = amount;
+    this.credits.textContent = `${amount} ¢`;
+    if (gained) {
+      this.credits.classList.remove('bump');
+      void this.credits.offsetWidth;
+      this.credits.classList.add('bump');
+    }
+  }
+
+  /** Invite d'interaction (« E : PARLER À … »), null pour la masquer. */
+  setPrompt(text: string | null): void {
+    const t = text ?? '';
+    if (this.prompt.textContent === t) return;
+    this.prompt.textContent = t;
+    this.prompt.classList.toggle('show', text !== null);
+  }
+
+  /** Bulle de dialogue non bloquante en bas de l'écran. */
+  showDialogue(speaker: string, text: string, color = '#ffd23b', duration = 4200): void {
+    this.dialogue.innerHTML = '';
+    const name = el('div', 'dlg-name', this.dialogue, speaker);
+    name.style.color = color;
+    el('div', 'dlg-text', this.dialogue, text);
+    this.dialogue.style.borderColor = color;
+    this.dialogue.classList.remove('show');
+    void this.dialogue.offsetWidth;
+    this.dialogue.classList.add('show');
+    if (this.dialogueTimer !== null) window.clearTimeout(this.dialogueTimer);
+    this.dialogueTimer = window.setTimeout(() => this.dialogue.classList.remove('show'), duration);
+  }
+
+  hideDialogue(): void {
+    this.dialogue.classList.remove('show');
   }
 
   /** Jauge circulaire de l'attaque chargée autour du réticule. */
@@ -204,40 +312,47 @@ export class HUD {
   // Écrans
   // ---------------------------------------------------------------------------
 
-  showStart(best: number | null): void {
-    const desktopControls = `
-          <div><kbd>ZQSD</kbd>/<kbd>WASD</kbd><span>Courir</span></div>
-          <div><kbd>Souris</kbd><span>Viser</span></div>
-          <div><kbd>Espace</kbd><span>Saut · double saut · saut mural</span></div>
-          <div><kbd>C</kbd>/<kbd>Ctrl</kbd><span>Glissade (garde l'élan)</span></div>
-          <div><kbd>Shift</kbd><span>Dash (au sol ou en l'air)</span></div>
-          <div><kbd>Avancer</kbd><span>contre un mur en l'air : wall-run</span></div>
-          <div><kbd>Clic G</kbd><span>Attaquer / tirer</span></div>
-          <div><kbd>Clic D</kbd><span>Sandevistan (ralenti)</span></div>
-          <div><kbd>1</kbd>/<kbd>2</kbd><span>Lames Mantis / Pistolet</span></div>
-          <div><kbd>R</kbd><span>Recommencer instantanément</span></div>`;
-    const touchControls = `
-          <div><kbd>Pouce gauche</kbd><span>Joystick : courir</span></div>
-          <div><kbd>Pouce droit</kbd><span>Glisser : viser</span></div>
-          <div><kbd>SAUT</kbd><span>Saut · double saut · saut mural</span></div>
-          <div><kbd>GLISSE</kbd><span>Glissade (garde l'élan)</span></div>
-          <div><kbd>DASH</kbd><span>Dash (au sol ou en l'air)</span></div>
-          <div><kbd>ATTAQUE</kbd><span>Maintenir pour enchaîner, glisser pour viser</span></div>
-          <div><kbd>⧗</kbd><span>Sandevistan (en haut à droite)</span></div>
-          <div><kbd>Joystick ↑</kbd><span>contre un mur en l'air : wall-run</span></div>
-          <div><kbd>⇄</kbd><span>Changer d'arme (en haut à droite)</span></div>
-          <div><kbd>↻</kbd> <kbd>❚❚</kbd><span>Recommencer · pause</span></div>`;
+  /** Nom du niveau affiché au-dessus du chrono. */
+  setLevelName(text: string): void {
+    this.levelLabel.textContent = text;
+  }
+
+  showStart(levels: LevelCard[], selected: number, credits: number): void {
+    const quickKeys = this.touch
+      ? ''
+      : `<div class="quick-keys">
+          <span><kbd>ZQSD</kbd> courir</span><span><kbd>ESPACE</kbd> saut</span><span><kbd>C</kbd> glisse</span>
+          <span><kbd>SHIFT</kbd> dash</span><span><kbd>CLIC G</kbd> attaque · maintenir : chargée</span>
+          <span><kbd>CLIC D</kbd> sandevistan</span><span><kbd>R</kbd> recommencer</span>
+        </div>`;
+    const cards = levels
+      .map((l, i) => {
+        const pips = Array.from({ length: 4 }, (_, k) => `<i class="${k < l.difficulty ? 'on' : ''}"></i>`).join('');
+        const accent = `#${l.accent.toString(16).padStart(6, '0')}`;
+        return `
+          <button class="level-card${i === selected ? ' selected' : ''}" data-act="level" data-level="${i}" type="button" style="--accent:${accent}">
+            <span class="lc-num">${String(i + 1).padStart(2, '0')}</span>
+            <span class="lc-name">${l.name}</span>
+            <span class="lc-sub">${l.subtitle}</span>
+            <span class="lc-foot"><span class="lc-diff" aria-label="Difficulté ${l.difficulty} sur 4">${pips}</span>
+            <span class="lc-best">${l.best !== null ? `★ ${HUD.formatTime(l.best)}` : 'NON TERMINÉ'}</span></span>
+          </button>`;
+      })
+      .join('');
     this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show start';
     this.overlay.innerHTML = `
       <div class="panel">
         <div class="title" data-text="NEON VERTIGO">NEON VERTIGO</div>
         <div class="subtitle">PROTOTYPE // PARKOUR · LAMES · SANDEVISTAN</div>
-        <div class="controls">${this.touch ? touchControls : desktopControls}</div>
-        <div class="objective">Rejoins la balise d'extraction dorée au bout des toits. Élimine les gardes et drones en un coup.</div>
-        ${best !== null ? `<div class="best">RECORD : ${HUD.formatTime(best)}</div>` : ''}
-        <div class="cta">${this.touch ? '[ TOUCHE POUR TE CONNECTER ]' : '[ CLIQUE POUR TE CONNECTER ]'}</div>
-        <button class="overlay-btn" data-act="tutorial" type="button">▶ REVOIR LE TUTORIEL</button>
+        <div class="pick">CHOISIS TON PARCOURS</div>
+        <div class="level-grid">${cards}</div>
+        ${quickKeys}
+        <div class="cta">${this.touch ? '[ TOUCHE UN NIVEAU POUR TE CONNECTER ]' : '[ CLIQUE SUR UN NIVEAU POUR TE CONNECTER ]'}</div>
+        <div class="btn-row">
+          <button class="overlay-btn plaza-btn" data-act="plaza" type="button">◆ LA PLAZA · ${credits} ¢</button>
+          <button class="overlay-btn" data-act="tutorial" type="button">▶ TUTORIEL &amp; COMMANDES</button>
+        </div>
         ${this.touch ? '<div class="sub">Plein écran et mode paysage recommandés</div>' : ''}
       </div>`;
   }
@@ -249,7 +364,10 @@ export class HUD {
       <div class="panel small">
         <div class="title small">PAUSE</div>
         <div class="cta">${this.touch ? '[ TOUCHE POUR REPRENDRE ]' : '[ CLIQUE POUR REPRENDRE ]'}</div>
-        <button class="overlay-btn" data-act="restart">↻ RECOMMENCER</button>
+        <div class="btn-row">
+          <button class="overlay-btn" data-act="restart" type="button">↻ RECOMMENCER</button>
+          <button class="overlay-btn" data-act="menu" type="button">☰ NIVEAUX</button>
+        </div>
         ${this.touch ? '' : '<div class="sub">R : recommencer</div>'}
       </div>`;
   }
@@ -261,11 +379,14 @@ export class HUD {
       <div class="panel small">
         <div class="title small glitch" data-text="FLATLINE">FLATLINE</div>
         <div class="stats">TEMPS ${HUD.formatTime(time)} · CIBLES ${kills}/${total}</div>
-        <div class="cta">${this.touch ? '[ TOUCHE POUR REDÉMARRER ]' : '[ R ] REDÉMARRER'}</div>
+        <div class="cta">${this.touch ? '[ TOUCHE POUR REDÉMARRER ]' : '[ R ] OU CLIC : REDÉMARRER'}</div>
+        <div class="btn-row">
+          <button class="overlay-btn" data-act="menu" type="button">☰ NIVEAUX</button>
+        </div>
       </div>`;
   }
 
-  showFinish(s: FinishStats): void {
+  showFinish(s: FinishStats, nextLabel: string, reward: Reward): void {
     this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show finish';
     this.overlay.innerHTML = `
@@ -274,7 +395,12 @@ export class HUD {
         <div class="big-time">${HUD.formatTime(s.time)}</div>
         <div class="stats">${s.isRecord ? '★ NOUVEAU RECORD ★' : `RECORD : ${s.best !== null ? HUD.formatTime(s.best) : '--'}`}</div>
         <div class="stats">CIBLES ÉLIMINÉES ${s.kills}/${s.totalEnemies}</div>
-        <div class="cta">${this.touch ? '[ TOUCHE POUR REJOUER ]' : '[ R ] REJOUER'}</div>
+        <div class="reward"><span class="reward-total">+${reward.total} ¢</span><span class="reward-lines">${reward.lines.join(' · ')}</span></div>
+        <button class="overlay-btn next-btn" data-act="next" type="button">${nextLabel}</button>
+        <div class="cta">${this.touch ? '[ TOUCHE POUR REJOUER ]' : '[ R ] OU CLIC : REJOUER'}</div>
+        <div class="btn-row">
+          <button class="overlay-btn" data-act="menu" type="button">☰ NIVEAUX</button>
+        </div>
       </div>`;
   }
 

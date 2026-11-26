@@ -9,6 +9,7 @@ import {
   sceneJump,
   sceneLore,
   sceneObjective,
+  scenePlaza,
   sceneSandevistan,
   sceneSlide,
   sceneSurvival,
@@ -73,7 +74,7 @@ function gamePages(touch: boolean): Page[] {
     ),
     page(
       'ATTAQUE CHARGÉE',
-      `Maintiens l'attaque une demi-seconde, puis relâche : tu fonces sur l'ennemi le plus proche et tu le tranches. Ce dash ne consomme aucune charge et te rend invulnérable.`,
+      `Maintiens l'attaque un court instant (0,3 s), puis relâche : tu fonces sur l'ennemi le plus proche et tu le tranches. Ce dash ne consomme aucune charge et te rend invulnérable.`,
       keys(['MAINTENIR CLIC GAUCHE'], ['MAINTENIR ATTAQUE']),
       sceneCharged,
     ),
@@ -82,6 +83,12 @@ function gamePages(touch: boolean): Page[] {
       'Ralentis le temps : le monde se fige presque, pas toi. La jauge se vide vite puis se recharge, et chaque élimination la remplit un peu.',
       keys(['CLIC DROIT'], ['⧗ (EN HAUT À DROITE)']),
       sceneSandevistan,
+    ),
+    page(
+      'LA PLAZA',
+      'Entre deux niveaux, souffle à la Plaza. Tes crédits (¢) gagnés en fin de niveau achètent des améliorations chez les marchands. Fouille partout : chats néon, borne d\'arcade, fontaine à vœux… La balise dorée mène au niveau suivant.',
+      keys(['E : PARLER / ACHETER'], ['BOUTON PARLER']),
+      scenePlaza,
     ),
     page(
       'SURVIE',

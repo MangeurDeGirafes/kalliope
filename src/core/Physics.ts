@@ -42,6 +42,10 @@ export class Physics {
     return this.world.createCollider(desc);
   }
 
+  removeCollider(collider: RAPIER.Collider): void {
+    this.world.removeCollider(collider, false);
+  }
+
   createCapsule(center: THREE.Vector3, halfHeight: number, radius: number): RAPIER.Collider {
     const desc = RAPIER.ColliderDesc.capsule(halfHeight, radius).setTranslation(center.x, center.y, center.z);
     return this.world.createCollider(desc);

@@ -141,6 +141,24 @@ export class EnemyManager {
     this.reset();
   }
 
+  /** Retire tous les ennemis (changement de niveau) et libère leurs ressources. */
+  clearAll(): void {
+    const shared = new Set<THREE.Material>([this.armorMat, this.clothMat, this.accentRedMat, this.accentMagentaMat, this.rotorMat]);
+    for (const e of this.enemies) {
+      this.scene.remove(e.root);
+      this.scene.remove(e.laser.mesh);
+      e.root.traverse((o) => {
+        if (!(o instanceof THREE.Mesh)) return;
+        o.geometry.dispose();
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) if (!shared.has(m)) m.dispose();
+      });
+      e.laser.material.dispose();
+    }
+    this.enemies.length = 0;
+    for (const p of this.projectiles) this.deactivate(p);
+  }
+
   reset(): void {
     for (const e of this.enemies) {
       e.alive = true;

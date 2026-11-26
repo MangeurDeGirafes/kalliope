@@ -15,6 +15,7 @@ const ICONS = {
   swap: '<path d="M4 8 h15 l-4 -4"/><path d="M20 16 h-15 l4 4"/>',
   pause: '<path d="M8 5 v14"/><path d="M16 5 v14"/>',
   restart: '<path d="M19 12 a7 7 0 1 1 -2.4 -5.3"/><path d="M19 4 v5 h-5"/>',
+  talk: '<path d="M4 5 h16 v10 h-9 l-5 4 v-4 h-2 z"/><path d="M8 10 h.01 M12 10 h.01 M16 10 h.01"/>',
 } as const;
 
 function svg(paths: string): string {
@@ -103,9 +104,18 @@ export class TouchControls {
       { key: 'swap', label: 'ARME', icon: ICONS.swap, tap: () => this.pulseAction(this.weapon === 'blades' ? 'weapon2' : 'weapon1') },
       { key: 'restart', label: '', icon: ICONS.restart, tap: () => this.pulseAction('restart') },
       { key: 'pause', label: '', icon: ICONS.pause, tap: () => this.onPause?.() },
+      { key: 'interact', label: 'PARLER', icon: ICONS.talk, tap: () => this.pulseAction('interact') },
     ];
     for (const spec of specs) this.createButton(spec);
     this.resetJoystick();
+
+    // Filet de sécurité : plus aucun doigt sur l'écran = plus rien d'appuyé,
+    // même si un pointerup / pointercancel s'est perdu en route.
+    const sweep = (e: TouchEvent) => {
+      if (e.touches.length === 0 && (this.tracked.size > 0 || this.joyPointer !== null)) this.releaseAll();
+    };
+    window.addEventListener('touchend', sweep, { capture: true });
+    window.addEventListener('touchcancel', sweep, { capture: true });
   }
 
   setVisible(visible: boolean): void {
@@ -131,6 +141,15 @@ export class TouchControls {
       dash.el.dataset.charges = String(state.dashCharges);
       dash.el.classList.toggle('empty', state.dashCharges <= 0);
     }
+  }
+
+  /** Bouton d'interaction (Plaza) : visible seulement près d'un point d'intérêt. */
+  setInteract(label: string | null): void {
+    const b = this.buttons.get('interact');
+    if (!b) return;
+    b.el.classList.toggle('show', label !== null);
+    const l = b.el.querySelector('.label');
+    if (l && label !== null && l.textContent !== label) l.textContent = label;
   }
 
   /** Relâche toutes les commandes (pause, fin de partie). */
@@ -201,7 +220,9 @@ export class TouchControls {
     zone.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       if (kind === 'joy') {
-        if (this.joyPointer !== null) return;
+        // Un nouveau doigt à gauche reprend toujours le joystick : si la fin du
+        // précédent n'a jamais été reçue, le joystick ne reste pas bloqué.
+        if (this.joyPointer !== null) this.tracked.delete(this.joyPointer);
         this.joyPointer = e.pointerId;
         this.tracked.set(e.pointerId, { kind: 'joy' });
         this.startJoystick(e.clientX, e.clientY);

@@ -5,6 +5,7 @@ import type { InputManager } from '../core/InputManager';
 import { MouseButton } from '../core/InputManager';
 import type { AudioSynthesizer } from '../core/AudioSynthesizer';
 import { CAMERA, DASH, LEDGE, MOVEMENT, PISTOL, PLAYER, SANDEVISTAN, SLIDE, WALLRUN } from '../config';
+import { STATS } from '../progress/Progress';
 
 const DOWN = new THREE.Vector3(0, -1, 0);
 
@@ -41,8 +42,8 @@ export class PlayerController {
   dashing = false;
   alive = true;
 
-  health: number = PLAYER.maxHealth;
-  dashCharges: number = DASH.maxCharges;
+  health: number = STATS.maxHealth;
+  dashCharges: number = STATS.dashMax;
   sandevistanActive = false;
   sandevistanEnergy = 1;
   /** 0 → 1, transition douce de l'effet Sandevistan. */
@@ -61,7 +62,7 @@ export class PlayerController {
   private coyoteTimer = 0;
   private jumpBuffer = 0;
   private justJumpedTimer = 0;
-  private airJumps: number = MOVEMENT.maxAirJumps;
+  private airJumps: number = STATS.airJumps;
   private slideTimer = 0;
   private slideCooldown = 0;
   private slideHeld = false;
@@ -143,7 +144,7 @@ export class PlayerController {
 
   /** Progression (0 → 1) de la recharge de la prochaine charge de dash. */
   get dashRechargeProgress(): number {
-    return this.dashCharges >= DASH.maxCharges ? 1 : this.dashRecharge / DASH.rechargeTime;
+    return this.dashCharges >= STATS.dashMax ? 1 : this.dashRecharge / STATS.dashRecharge;
   }
 
   /** Segment interne de la capsule (pour les collisions avec les projectiles). */
@@ -180,10 +181,10 @@ export class PlayerController {
     this.wallRunning = false;
     this.dashing = false;
     this.alive = true;
-    this.health = PLAYER.maxHealth;
-    this.dashCharges = DASH.maxCharges;
+    this.health = STATS.maxHealth;
+    this.dashCharges = STATS.dashMax;
     this.dashRecharge = 0;
-    this.airJumps = MOVEMENT.maxAirJumps;
+    this.airJumps = STATS.airJumps;
     this.sandevistanActive = false;
     this.sandevistanEnergy = 1;
     this.sandevistanBlend = 0;
@@ -227,8 +228,8 @@ export class PlayerController {
     this.grounded = false;
     this.coyoteTimer = 0;
     this.justJumpedTimer = 0.25;
-    this.airJumps = MOVEMENT.maxAirJumps;
-    this.dashCharges = DASH.maxCharges;
+    this.airJumps = STATS.airJumps;
+    this.dashCharges = STATS.dashMax;
     this.fovKick = Math.max(this.fovKick, 8);
   }
 
@@ -331,7 +332,7 @@ export class PlayerController {
   /** Rend 20 % (ou plus) de jauge Sandevistan et une charge de dash (récompense d'élimination). */
   rewardKill(): void {
     this.sandevistanEnergy = Math.min(1, this.sandevistanEnergy + SANDEVISTAN.killRefill);
-    this.dashCharges = Math.min(DASH.maxCharges, this.dashCharges + 1);
+    this.dashCharges = Math.min(STATS.dashMax, this.dashCharges + 1);
   }
 
   /** Inflige des dégâts. Renvoie true si le coup a été encaissé. */
@@ -484,9 +485,9 @@ export class PlayerController {
     this.invulnerable = Math.max(0, this.invulnerable - realDt);
     this.hurtFlash = Math.max(0, this.hurtFlash - realDt * 2.2);
 
-    if (this.dashCharges < DASH.maxCharges) {
+    if (this.dashCharges < STATS.dashMax) {
       this.dashRecharge += dt;
-      if (this.dashRecharge >= DASH.rechargeTime) {
+      if (this.dashRecharge >= STATS.dashRecharge) {
         this.dashCharges++;
         this.dashRecharge = 0;
       }
@@ -494,7 +495,7 @@ export class PlayerController {
       this.dashRecharge = 0;
     }
 
-    if (this.alive && this.health < PLAYER.maxHealth) {
+    if (this.alive && this.health < STATS.maxHealth) {
       this.regenTimer += realDt;
       if (this.regenTimer >= PLAYER.healthRegenDelay) {
         this.health++;
@@ -744,8 +745,8 @@ export class PlayerController {
     this.wallNormal.copy(this.tmpN);
     this.wallSide = -this.tmpN.dot(this.right) > 0 ? 1 : -1;
     this.velocity.y = THREE.MathUtils.clamp(this.velocity.y, 1, WALLRUN.maxVerticalOnStart);
-    this.airJumps = MOVEMENT.maxAirJumps;
-    this.dashCharges = DASH.maxCharges;
+    this.airJumps = STATS.airJumps;
+    this.dashCharges = STATS.dashMax;
     this.audio.playWallRunStart();
     this.audio.setWallRunning(true);
   }
@@ -791,7 +792,7 @@ export class PlayerController {
     this.velocity.y = WALLRUN.jumpUp;
     this.listener?.onWallJump?.(this.position, this.wallNormal);
     this.endWallRun(false);
-    this.airJumps = MOVEMENT.maxAirJumps;
+    this.airJumps = STATS.airJumps;
     this.justJumpedTimer = 0.12;
     this.audio.playDoubleJump();
   }
@@ -852,7 +853,7 @@ export class PlayerController {
       else this.audio.playDenied();
     }
     if (this.sandevistanActive) {
-      this.sandevistanEnergy -= SANDEVISTAN.drainPerSecond * realDt;
+      this.sandevistanEnergy -= STATS.sandDrain * realDt;
       if (this.sandevistanEnergy <= 0) {
         this.sandevistanEnergy = 0;
         this.setSandevistan(false);
@@ -930,8 +931,8 @@ export class PlayerController {
   }
 
   private onLand(fallSpeed: number): void {
-    this.airJumps = MOVEMENT.maxAirJumps;
-    this.dashCharges = DASH.maxCharges;
+    this.airJumps = STATS.airJumps;
+    this.dashCharges = STATS.dashMax;
     this.lastWallNormal.set(0, 0, 0);
     this.wallCooldown = 0;
     if (this.wallRunning) this.endWallRun(false);

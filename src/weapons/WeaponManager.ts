@@ -13,6 +13,7 @@ import { createRadialTexture } from '../effects/ParticleSystem';
 import { MantisArm, armPose, createArmPose, lerpArmPose, mirrorArmPose } from './MantisBladeModel';
 import type { ArmPose } from './MantisBladeModel';
 import { BLADES, CHARGED, LIGHTING, PISTOL, TOUCH } from '../config';
+import { STATS } from '../progress/Progress';
 import { vibrate } from '../core/Device';
 
 export type WeaponId = 'blades' | 'pistol';
@@ -456,8 +457,8 @@ export class WeaponManager {
     const eye = this.engine.camera.position;
     const forward = this.player.getLookDirection(this.tmp);
     const cone = this.touchMode ? TOUCH.lungeConeDeg : BLADES.lungeConeDeg;
-    const lungeTarget = this.enemies.findLungeTarget(eye, forward, BLADES.lungeRange, Math.cos(THREE.MathUtils.degToRad(cone)));
-    if (lungeTarget && lungeTarget.distanceTo(eye) > BLADES.range * 0.8) {
+    const lungeTarget = this.enemies.findLungeTarget(eye, forward, STATS.lungeRange, Math.cos(THREE.MathUtils.degToRad(cone)));
+    if (lungeTarget && lungeTarget.distanceTo(eye) > STATS.bladeRange * 0.8) {
       this.player.lungeTo(lungeTarget, BLADES.lungeSpeed);
     } else {
       this.player.pushForward(BLADES.forwardPush);
@@ -530,7 +531,7 @@ export class WeaponManager {
         const eye = this.engine.camera.position;
         const forward = this.player.getLookDirection(this.tmp);
         const cos = Math.cos(THREE.MathUtils.degToRad(BLADES.coneAngleDeg));
-        const kills = this.enemies.meleeSweep(eye, forward, BLADES.range, cos);
+        const kills = this.enemies.meleeSweep(eye, forward, STATS.bladeRange, cos);
         if (kills > 0) this.audio.playBladeHit();
         this.enemies.deflectProjectiles(eye, forward, BLADES.deflectRange, Math.cos(THREE.MathUtils.degToRad(70)));
       }

@@ -18,7 +18,8 @@ export type Action =
   | 'dash'
   | 'weapon1'
   | 'weapon2'
-  | 'restart';
+  | 'restart'
+  | 'interact';
 
 const BINDINGS: Record<Action, readonly string[]> = {
   forward: ['KeyW', 'KeyZ', 'ArrowUp'],
@@ -31,6 +32,7 @@ const BINDINGS: Record<Action, readonly string[]> = {
   weapon1: ['Digit1', 'Numpad1'],
   weapon2: ['Digit2', 'Numpad2'],
   restart: ['KeyR'],
+  interact: ['KeyE', 'KeyF'],
 };
 
 export const MouseButton = {

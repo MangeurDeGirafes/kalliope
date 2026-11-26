@@ -15,6 +15,8 @@ export class AudioSynthesizer {
   private slowFilter!: BiquadFilterNode;
   private sfx!: GainNode;
   private ambience!: GainNode;
+  private rainGain: GainNode | null = null;
+  private rainLevel = 1;
   private noiseBuffer!: AudioBuffer;
   private wallRunLoop: LoopChannel | null = null;
   private slideLoop: LoopChannel | null = null;
@@ -208,6 +210,19 @@ export class AudioSynthesizer {
     this.noise({ duration: 0.12, volume: 0.12, type: 'bandpass', from: 700, to: 1600, q: 1 });
   }
 
+  /** Densité de la pluie (0..1) : volume du bruit de pluie ambiant. */
+  setRainLevel(level: number): void {
+    this.rainLevel = level;
+    if (this.ctx && this.rainGain) this.rainGain.gain.setTargetAtTime(0.09 * level, this.ctx.currentTime, 0.4);
+  }
+
+  /** Tonnerre : craquement sec puis grondement qui roule, après `delay` secondes. */
+  playThunder(delay: number): void {
+    this.noise({ duration: 0.4, volume: 0.22, type: 'highpass', from: 2200, to: 500, q: 0.5, delay, raw: true });
+    this.noise({ duration: 2.8, volume: 0.5, type: 'lowpass', from: 480, to: 45, q: 0.8, delay: delay + 0.05, raw: true });
+    this.noise({ duration: 2, volume: 0.28, type: 'lowpass', from: 240, to: 40, q: 1.2, delay: delay + 0.7, raw: true });
+  }
+
   playJumpPad(): void {
     this.tone({ type: 'sine', from: 120, to: 900, duration: 0.45, volume: 0.25 });
     this.tone({ type: 'square', from: 240, to: 1800, duration: 0.35, volume: 0.05 });
@@ -255,6 +270,30 @@ export class AudioSynthesizer {
   }
 
   /** Petit bip d'interface (navigation du tutoriel). */
+  /** Crédits encaissés : deux notes claires. */
+  playCoin(): void {
+    this.tone({ type: 'square', from: 988, to: 988, duration: 0.07, volume: 0.045, raw: true });
+    this.tone({ type: 'square', from: 1319, to: 1319, duration: 0.16, volume: 0.045, delay: 0.07, raw: true });
+  }
+
+  /** Miaulement synthétique (chat néon trouvé). */
+  playMeow(): void {
+    this.tone({ type: 'triangle', from: 620, to: 1150, duration: 0.14, volume: 0.09, raw: true });
+    this.tone({ type: 'triangle', from: 1150, to: 540, duration: 0.3, volume: 0.08, delay: 0.13, raw: true });
+  }
+
+  /** Petite mélodie de borne d'arcade. */
+  playArcade(): void {
+    const notes = [523, 659, 784, 1047, 784, 1047, 1319];
+    notes.forEach((f, i) => this.tone({ type: 'square', from: f, to: f, duration: 0.09, volume: 0.04, delay: i * 0.085, raw: true }));
+  }
+
+  /** Plouf de la fontaine. */
+  playSplash(): void {
+    this.tone({ type: 'sine', from: 1400, to: 300, duration: 0.18, volume: 0.07, raw: true });
+    this.noise({ duration: 0.35, volume: 0.08, type: 'bandpass', from: 2400, to: 600, q: 1.2, delay: 0.05, raw: true });
+  }
+
   playUiBlip(): void {
     this.tone({ type: 'square', from: 880, to: 1320, duration: 0.05, volume: 0.035, raw: true });
   }
@@ -453,7 +492,8 @@ export class AudioSynthesizer {
     rainLP.type = 'lowpass';
     rainLP.frequency.value = 7500;
     const rainGain = ctx.createGain();
-    rainGain.gain.value = 0.09;
+    rainGain.gain.value = 0.09 * this.rainLevel;
+    this.rainGain = rainGain;
     rain.connect(rainHP).connect(rainLP).connect(rainGain).connect(this.ambience);
     rain.start();
 

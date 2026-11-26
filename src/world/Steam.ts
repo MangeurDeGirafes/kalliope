@@ -72,6 +72,12 @@ export class Steam {
     this.vents.push({ position: position.clone(), rate, acc: Math.random() });
   }
 
+  /** Supprime toutes les bouches de vapeur et les volutes encore visibles. */
+  clearVents(): void {
+    this.vents.length = 0;
+    this.life.fill(0);
+  }
+
   setViewport(viewportHeightPx: number, fovDeg: number): void {
     this.material.uniforms.uScale.value = (viewportHeightPx * 0.5) / Math.tan(THREE.MathUtils.degToRad(fovDeg) * 0.5);
   }

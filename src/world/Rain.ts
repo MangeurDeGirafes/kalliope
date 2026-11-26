@@ -10,6 +10,7 @@ import { QUALITY } from '../core/Device';
 export class Rain {
   readonly mesh: THREE.LineSegments;
   private readonly count = QUALITY.rainCount;
+  private active = QUALITY.rainCount;
   private readonly drops: Float32Array;
   private readonly speeds: Float32Array;
   private readonly positions: Float32Array;
@@ -41,6 +42,13 @@ export class Rain {
     scene.add(this.mesh);
   }
 
+  /** Densité de pluie (0..1) : seules les premières gouttes sont animées et dessinées. */
+  setIntensity(k: number): void {
+    this.active = Math.round(this.count * THREE.MathUtils.clamp(k, 0, 1));
+    this.geometry.setDrawRange(0, this.active * 2);
+    this.mesh.visible = this.active > 0;
+  }
+
   update(dt: number, center: THREE.Vector3): void {
     const s = WORLD.rainAreaSize;
     const h = WORLD.rainAreaHeight;
@@ -48,7 +56,7 @@ export class Rain {
     const halfH = h / 2;
     const wind = WORLD.rainWind;
     const len = WORLD.rainLength;
-    for (let i = 0; i < this.count; i++) {
+    for (let i = 0; i < this.active; i++) {
       const sp = this.speeds[i];
       let x = this.drops[i * 3] + wind * dt;
       let y = this.drops[i * 3 + 1] - sp * dt;

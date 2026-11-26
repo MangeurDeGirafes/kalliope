@@ -16,6 +16,9 @@ import {
 import type { BillboardKind, FacadeStyle, RoofStyle } from './PixelTextures';
 import { LIGHTING, WORLD } from '../config';
 import { QUALITY } from '../core/Device';
+import { NEON } from './levels';
+import type { LevelDef, ThemeDef } from './levels';
+import type RAPIER from '@dimforge/rapier3d-compat';
 
 export interface JumpPad {
   position: THREE.Vector3;
@@ -34,23 +37,6 @@ export interface LevelData {
   finish: { position: THREE.Vector3; radius: number };
   killPlaneY: number;
 }
-
-/** Palette néon : bien plus large que le duo rose / bleu. */
-const NEON = {
-  cyan: 0x00e5ff,
-  magenta: 0xff2bd6,
-  purple: 0xa36bff,
-  orange: 0xff8a2b,
-  red: 0xff3b3b,
-  green: 0x2bffb0,
-  yellow: 0xffd23b,
-  lime: 0x9dff5c,
-  amber: 0xffb030,
-  sodium: 0xff9a3c,
-  pink: 0xff4fa3,
-  teal: 0x2bd9c5,
-  warm: 0xfff1d6,
-} as const;
 
 const BASE_Y = -70;
 /** Une texture de façade couvre 20 m × 24 m (modules de 2,5 m × 3 m). */
@@ -104,9 +90,9 @@ export class LevelBuilder {
   private readonly panelMaterial: THREE.MeshStandardMaterial;
   private readonly darkMaterial: THREE.MeshStandardMaterial;
   /** Accessoires colorés (couleurs par sommet) : un seul draw call pour tous. */
-  private readonly propMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0.2 });
+  readonly propMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0.2 });
   /** Éléments lumineux colorés (ampoules, écrans, voyants) : un seul draw call. */
-  private readonly glowMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+  readonly glowMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   private readonly neonMaterials = new Map<number, THREE.MeshBasicMaterial>();
   private readonly billboardTextures = new Map<string, THREE.CanvasTexture>();
   private readonly facadeTime = { value: 0 };
@@ -122,6 +108,10 @@ export class LevelBuilder {
   } | null = null;
   private rain: Rain | null = null;
   private readonly steam: Steam;
+  /** Contenu du niveau courant (retiré au changement de niveau). */
+  readonly course = new THREE.Group();
+  private readonly courseColliders: RAPIER.Collider[] = [];
+  readonly courseDisposables: { dispose(): void }[] = [];
   /** Zones à garder libres (ennemis, tremplins, obstacles) lors du placement des accessoires. */
   private readonly exclusions: { x: number; z: number; r: number }[] = [];
   private readonly roofs: { cx: number; cz: number; w: number; d: number; top: number; seed: number }[] = [];
@@ -133,6 +123,7 @@ export class LevelBuilder {
     this.scene = scene;
     this.physics = physics;
     this.steam = new Steam(scene);
+    scene.add(this.course);
 
     this.facadeMaterials = FACADES.map(([style, seed]) => this.createFacadeMaterial(style, seed));
     const roofSeeds: Record<RoofStyle, number> = { tar: 7, concrete: 19, green: 29, rust: 31 };
@@ -161,112 +152,97 @@ export class LevelBuilder {
   // Construction
   // ---------------------------------------------------------------------------
 
-  build(): LevelData {
-    const enemySpawns: EnemySpawn[] = [];
-    const guard = (x: number, y: number, z: number, yaw = 0) => {
-      enemySpawns.push({ type: 'guard', position: new THREE.Vector3(x, y, z), yaw });
-      this.exclusions.push({ x, z, r: 3 });
-    };
-    const drone = (x: number, y: number, z: number) =>
-      enemySpawns.push({ type: 'drone', position: new THREE.Vector3(x, y, z), yaw: 0 });
-
-    this.exclusions.push({ x: 0, z: 6, r: 3 });
-
-    // --- B1 : toit de départ (briques, toit goudronné) -------------------------
-    this.addBuilding(0, -9, 16, 42, 0, NEON.amber, 0, 'tar');
-    this.queueRoofProps(0, -9, 16, 42, 0, 11);
-    this.addHoloSign(['ZQSD / WASD : COURIR', 'SOURIS : VISER'], new THREE.Vector3(0, 2.7, -3), NEON.cyan, 5.5);
-    this.addHoloSign(['ESPACE : SAUTER', 'ESPACE EN L\'AIR : DOUBLE SAUT'], new THREE.Vector3(-3.5, 2.8, -22), NEON.amber, 5.5);
-    this.addHoloSign(['CLIC GAUCHE : LAMES MANTIS', '1 / 2 : CHANGER D\'ARME'], new THREE.Vector3(4.5, 3.2, -14), NEON.magenta, 5);
-    guard(4.5, 0, -27, 0);
-    this.addNeonLight(new THREE.Vector3(0, 6, -10), NEON.sodium, 22, 30);
-
-    // --- B2 : obstacle à glisser dessous (carrelage, balcons) ------------------
-    this.addBuilding(0, -55, 18, 34, 0.5, NEON.pink, 1, 'concrete');
-    this.queueRoofProps(0, -55, 18, 34, 0.5, 23);
-    this.addSlideBarrier(0, -50, 18, 0.5);
-    this.addHoloSign(['C / CTRL : GLISSADE', 'GARDE TON ÉLAN !'], new THREE.Vector3(-3, 3.2, -43), NEON.orange, 5);
-    this.addHoloSign(['WALL-RUN ►', 'SAUTE VERS LE MUR', 'EN MAINTENANT AVANCER'], new THREE.Vector3(5, 3.6, -68), NEON.lime, 4.6);
-    guard(-4, 0.5, -63, 0);
-    guard(5.5, 0.5, -69, -0.3);
-    this.addNeonLight(new THREE.Vector3(0, 6, -60), NEON.pink, 22, 30);
-
-    // --- Gouffre 2 : double mur de wall-run (balisage vert citron) -------------
-    this.addWallRunWall(3.9, -71, -90, 9, -1, NEON.lime, 'vertigo');
-    this.addWallRunWall(-3.9, -86, -104, 9, 1, NEON.lime, 'koi');
-    this.addNeonLight(new THREE.Vector3(0, 5, -87), NEON.lime, 16, 28);
-
-    // --- B3 : premier vrai combat + tremplin (béton, toit végétalisé) ---------
-    this.addBuilding(0, -120, 18, 32, 0, NEON.teal, 2, 'green');
-    this.queueRoofProps(0, -120, 18, 32, 0, 37);
-    this.addHoloSign(['CLIC DROIT : SANDEVISTAN', 'LE TEMPS RALENTIT'], new THREE.Vector3(-5, 3, -108), NEON.green, 5);
-    this.addHoloSign(['▲ TREMPLIN ▲'], new THREE.Vector3(0, 4.2, -128), NEON.green, 3.6);
-    guard(-5, 0, -117, 0.2);
-    guard(5, 0, -125, -0.2);
-    drone(0, 6.5, -114);
-    this.addJumpPad(new THREE.Vector3(0, 0, -132), 22.5, new THREE.Vector3(0, 0, -6));
-    this.addNeonLight(new THREE.Vector3(0, 6, -124), NEON.teal, 22, 30);
-
-    // --- B4 : toit haut (tôle rouillée) ----------------------------------------
-    this.addBuilding(0, -164, 16, 36, 8, NEON.red, 3, 'rust');
-    this.queueRoofProps(0, -164, 16, 36, 8, 41);
-    this.addSlideBarrier(0, -160, 16, 8);
-    this.addHoloSign(['SHIFT : DASH', 'MUR À GAUCHE ◄'], new THREE.Vector3(-3, 11.4, -178), NEON.yellow, 5);
-    guard(5, 8, -170, 0);
-    guard(-4.5, 8, -176, 0.3);
-    drone(0, 14, -166);
-    this.addNeonLight(new THREE.Vector3(0, 14, -165), NEON.sodium, 22, 30);
-
-    // --- Gouffre 4 : wall-run descendant (marché de nuit) ----------------------
-    this.addWallRunWall(-3.9, -181, -205, 14, 1, NEON.lime, 'ramen');
-    drone(6, 10, -193);
-    drone(-1, 13, -201);
-    this.addNeonLight(new THREE.Vector3(2, 10, -195), NEON.pink, 19, 30);
-
-    // --- B5 (immeuble pastel) ------------------------------------------------------
-    this.addBuilding(0, -221, 18, 30, 4, NEON.purple, 4, 'concrete');
-    this.queueRoofProps(0, -221, 18, 30, 4, 53);
-    guard(3, 4, -216, 0);
-    guard(-5, 4, -229, 0.4);
-    this.addNeonLight(new THREE.Vector3(0, 10, -222), NEON.purple, 22, 30);
-
-    // --- Plateformes ascendantes -------------------------------------------------
-    this.addBuilding(0, -244, 7, 7, 5, NEON.lime, 5, 'tar');
-    this.addBuilding(4, -255, 7, 7, 6, NEON.amber, 6, 'tar');
-    this.addBuilding(-2, -266, 7, 7, 7, NEON.cyan, 1, 'tar');
-    this.addJumpPad(new THREE.Vector3(-2, 7, -266.5), 14.5, new THREE.Vector3(0.6, 0, -6));
-    drone(7, 12, -255);
-
-    // --- B6 : tour de verre finale + extraction -------------------------------------
-    this.addBuilding(0, -291, 20, 30, 9, NEON.warm, 7, 'tar');
-    this.queueRoofProps(0, -291, 20, 30, 9, 67);
-    guard(-6, 9, -284, 0);
-    guard(6, 9, -290, 0);
-    guard(0, 9, -297, 0);
-    drone(0, 15.5, -290);
-    const finish = new THREE.Vector3(0, 9, -301);
-    this.addFinishBeacon(finish);
-    this.addNeonLight(new THREE.Vector3(0, 15, -292), NEON.yellow, 25, 32);
-
-    // Accessoires de toit placés en dernier pour éviter les zones réservées
-    for (const r of this.roofs) this.addRoofProps(r.cx, r.cz, r.w, r.d, r.top, r.seed);
-
-    // --- Décor ----------------------------------------------------------------------
-    this.addCourseSigns();
+  /** Décor commun à tous les niveaux : ville, circulation, rues, pluie. */
+  buildEnvironment(): void {
     this.buildCity();
     this.buildTraffic();
     this.addStreetGlow();
-    this.flushBatches();
+    this.flushBatches(this.scene);
     this.rain = new Rain(this.scene);
+  }
+
+  /**
+   * Remplace le parcours courant par celui de `def`. `decorate` ajoute des
+   * éléments sur mesure (Plaza) avec les mêmes outils, nettoyés au changement.
+   */
+  loadLevel(def: LevelDef, decorate?: (builder: LevelBuilder) => void): LevelData {
+    this.clearCourse();
+    const enemySpawns: EnemySpawn[] = [];
+    for (const [x, y, z, yaw] of def.guards) {
+      enemySpawns.push({ type: 'guard', position: new THREE.Vector3(x, y, z), yaw });
+      this.exclusions.push({ x, z, r: 3 });
+    }
+    for (const [x, y, z] of def.drones) enemySpawns.push({ type: 'drone', position: new THREE.Vector3(x, y, z), yaw: 0 });
+    this.exclusions.push({ x: def.spawn[0], z: def.spawn[2], r: 3 });
+
+    for (const b of def.buildings) {
+      this.addBuilding(b.x, b.z, b.w, b.d, b.top, NEON[b.trim], b.facade, b.roof);
+      if (b.props !== undefined) this.queueRoofProps(b.x, b.z, b.w, b.d, b.top, b.props);
+    }
+    for (const w of def.walls) this.addWallRunWall(w.x, w.z0, w.z1, w.top, w.face, NEON.lime, w.ad);
+    for (const bar of def.barriers) this.addSlideBarrier(bar.x, bar.z, bar.roofWidth, bar.roofY);
+    for (const p of def.pads) this.addJumpPad(new THREE.Vector3(...p.pos), p.power, new THREE.Vector3(...p.boost));
+    for (const h of def.holos) this.addHoloSign(h.lines, new THREE.Vector3(...h.pos), NEON[h.color], h.width);
+    const finish = new THREE.Vector3(...def.finish);
+    this.addFinishBeacon(finish);
+
+    if (def.lights) {
+      for (const l of def.lights) this.addNeonLight(new THREE.Vector3(...l.pos), NEON[l.color], l.intensity, l.distance);
+    } else {
+      for (const b of def.buildings) {
+        if (b.d >= 20) this.addNeonLight(new THREE.Vector3(b.x, b.top + 6, b.z), NEON[b.trim], 22, 30);
+      }
+    }
+
+    decorate?.(this);
+    // Accessoires de toit placés en dernier pour éviter les zones réservées
+    for (const r of this.roofs) this.addRoofProps(r.cx, r.cz, r.w, r.d, r.top, r.seed);
+    this.addSigns(def);
+    this.flushBatches(this.course);
+    this.rain?.setIntensity(def.theme.rain);
 
     return {
-      spawn: new THREE.Vector3(0, 0, 6),
-      spawnYaw: 0,
+      spawn: new THREE.Vector3(...def.spawn),
+      spawnYaw: def.spawnYaw,
       enemySpawns,
       jumpPads: this.jumpPads,
       finish: { position: finish, radius: 3.2 },
       killPlaneY: WORLD.killPlaneY,
     };
+  }
+
+  /** Thème visuel du niveau (utilisé par le moteur pour le ciel et le brouillard). */
+  static themeOf(def: LevelDef): ThemeDef {
+    return def.theme;
+  }
+
+  private clearCourse(): void {
+    this.course.traverse((obj) => {
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite) obj.geometry.dispose();
+    });
+    this.course.clear();
+    for (const c of this.courseColliders) this.physics.removeCollider(c);
+    this.courseColliders.length = 0;
+    for (const d of this.courseDisposables) d.dispose();
+    this.courseDisposables.length = 0;
+    this.steam.clearVents();
+    this.jumpPads.length = 0;
+    this.padVisuals.length = 0;
+    this.flickers.length = 0;
+    this.beaconMaterials.length = 0;
+    this.spinners.length = 0;
+    this.exclusions.length = 0;
+    this.roofs.length = 0;
+  }
+
+  /** Bouche de vapeur (supprimée au changement de parcours). */
+  addSteamVent(position: THREE.Vector3, rate = 5): void {
+    this.steam.addVent(position, rate);
+  }
+
+  /** Collision statique appartenant au parcours courant. */
+  addCollider(center: THREE.Vector3, halfExtents: THREE.Vector3, rotationY = 0): void {
+    this.courseColliders.push(this.physics.addBox(center, halfExtents, rotationY));
   }
 
   reset(): void {
@@ -364,7 +340,7 @@ export class LevelBuilder {
     return m;
   }
 
-  private billboard(kind: BillboardKind, width = 64): THREE.CanvasTexture {
+  billboard(kind: BillboardKind, width = 64): THREE.CanvasTexture {
     const key = `${kind}-${width}`;
     let tex = this.billboardTextures.get(key);
     if (!tex) {
@@ -374,7 +350,7 @@ export class LevelBuilder {
     return tex;
   }
 
-  private signMaterial(map: THREE.Texture, brightness: number): THREE.MeshBasicMaterial {
+  signMaterial(map: THREE.Texture, brightness: number): THREE.MeshBasicMaterial {
     return new THREE.MeshBasicMaterial({ map, color: new THREE.Color(1, 1, 1).multiplyScalar(brightness * LIGHTING.signs) });
   }
 
@@ -408,7 +384,7 @@ export class LevelBuilder {
     list.push(g);
   }
 
-  private matrix(x: number, y: number, z: number, rotY = 0, rotX = 0, rotZ = 0): THREE.Matrix4 {
+  matrix(x: number, y: number, z: number, rotY = 0, rotX = 0, rotZ = 0): THREE.Matrix4 {
     return new THREE.Matrix4().compose(
       new THREE.Vector3(x, y, z),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(rotX, rotY, rotZ, 'YXZ')),
@@ -421,27 +397,27 @@ export class LevelBuilder {
   }
 
   /** Boîte colorée (matériau d'accessoires partagé). */
-  private prop(w: number, h: number, d: number, x: number, y: number, z: number, hex: number, rotY = 0, rotX = 0): void {
+  prop(w: number, h: number, d: number, x: number, y: number, z: number, hex: number, rotY = 0, rotX = 0): void {
     this.batch(this.propMaterial, new THREE.BoxGeometry(w, h, d), this.matrix(x, y, z, rotY, rotX), this.tmpColor.set(hex));
   }
 
   /** Géométrie quelconque colorée. */
-  private propGeo(geo: THREE.BufferGeometry, m: THREE.Matrix4, hex: number): void {
+  propGeo(geo: THREE.BufferGeometry, m: THREE.Matrix4, hex: number): void {
     this.batch(this.propMaterial, geo, m, this.tmpColor.set(hex));
   }
 
   /** Boîte lumineuse colorée (ampoules, écrans, voyants). */
-  private glow(w: number, h: number, d: number, x: number, y: number, z: number, hex: number, intensity = 2.5): void {
+  glow(w: number, h: number, d: number, x: number, y: number, z: number, hex: number, intensity = 2.5): void {
     const c = this.tmpColor.set(hex).multiplyScalar(intensity * LIGHTING.neon);
     this.batch(this.glowMaterial, new THREE.BoxGeometry(w, h, d), this.matrix(x, y, z), c);
   }
 
-  private flushBatches(): void {
+  private flushBatches(target: THREE.Object3D): void {
     for (const [material, geos] of this.batches) {
       const merged = mergeGeometries(geos, false);
       if (!merged) continue;
       const mesh = new THREE.Mesh(merged, material);
-      this.scene.add(mesh);
+      target.add(mesh);
       for (const g of geos) g.dispose();
     }
     this.batches.clear();
@@ -468,8 +444,8 @@ export class LevelBuilder {
     const roofMat = this.roofMaterials.get(roof)!;
     const mesh = new THREE.Mesh(geo, [fac, fac, roofMat, this.darkMaterial, fac, fac]);
     mesh.position.set(cx, BASE_Y + h / 2, cz);
-    this.scene.add(mesh);
-    this.physics.addBox(new THREE.Vector3(cx, BASE_Y + h / 2, cz), new THREE.Vector3(w / 2, h / 2, d / 2));
+    this.course.add(mesh);
+    this.addCollider(new THREE.Vector3(cx, BASE_Y + h / 2, cz), new THREE.Vector3(w / 2, h / 2, d / 2));
 
     // Liseré néon sur le pourtour du toit
     const trim = this.neon(trimColor, 3);
@@ -545,7 +521,7 @@ export class LevelBuilder {
         this.prop(2.6, 0.9, 1.2, x, top + 0.45, z, 0x8a8e96);
         this.prop(0.4, 0.5, 0.4, x + 0.8, top + 1.15, z, 0x5a5e66);
         this.steam.addVent(new THREE.Vector3(x + 0.8, top + 1.45, z), 4);
-        this.physics.addBox(new THREE.Vector3(x, top + 0.45, z), new THREE.Vector3(1.3, 0.45, 0.6));
+        this.addCollider(new THREE.Vector3(x, top + 0.45, z), new THREE.Vector3(1.3, 0.45, 0.6));
       }
     }
   }
@@ -563,7 +539,7 @@ export class LevelBuilder {
       this.glow(0.06, 0.06, 0.06, x + 0.62, top + 0.9, zi + 0.71, pick(rng, [0x2bff6a, 0xff3b3b, 0x3b8bff]), 3);
     }
     if (rng() < 0.6) this.steam.addVent(new THREE.Vector3(x, top + 1.25, z), 3);
-    this.physics.addBox(new THREE.Vector3(x, top + 0.55, z - (n - 1) * 0.85), new THREE.Vector3(0.8, 0.55, (n * 1.7 - 0.3) / 2));
+    this.addCollider(new THREE.Vector3(x, top + 0.55, z - (n - 1) * 0.85), new THREE.Vector3(0.8, 0.55, (n * 1.7 - 0.3) / 2));
     return n * 1.7;
   }
 
@@ -583,7 +559,7 @@ export class LevelBuilder {
       this.prop(0.03, 0.18, 0.6, fx, top + 0.42, zi, 0x15151a);
       this.glow(0.02, 0.16, 0.9, fx, top + 1.83, zi, body, 2.4);
     }
-    this.physics.addBox(new THREE.Vector3(x, top + 0.95, z - (n - 1) * 0.55), new THREE.Vector3(0.4, 0.95, (n * 1.1) / 2));
+    this.addCollider(new THREE.Vector3(x, top + 0.95, z - (n - 1) * 0.55), new THREE.Vector3(0.4, 0.95, (n * 1.1) / 2));
     return n * 1.1;
   }
 
@@ -610,9 +586,9 @@ export class LevelBuilder {
         const s = 0.6 + rng() * 0.4;
         this.prop(s, s * 0.8, s, x + (rng() - 0.5) * 0.5, top + 1.8 + rng() * 0.5, zt + (rng() - 0.5) * 0.5, pick(rng, LEAVES), rng() * 3);
       }
-      this.physics.addBox(new THREE.Vector3(x, top + 0.3, zt), new THREE.Vector3(0.35, 0.3, 0.35));
+      this.addCollider(new THREE.Vector3(x, top + 0.3, zt), new THREE.Vector3(0.35, 0.3, 0.35));
     }
-    this.physics.addBox(new THREE.Vector3(x, top + 0.225, z - (n - 1) * 0.525), new THREE.Vector3(0.45, 0.225, (n * 1.05) / 2));
+    this.addCollider(new THREE.Vector3(x, top + 0.225, z - (n - 1) * 0.525), new THREE.Vector3(0.45, 0.225, (n * 1.05) / 2));
     return n * 1.05 + 1;
   }
 
@@ -649,7 +625,7 @@ export class LevelBuilder {
     ]) {
       this.prop(0.12, 0.9, 0.12, x + ox, top + 0.45, z + oz, 0x2a2a30);
     }
-    this.physics.addBox(new THREE.Vector3(x, top + 1.7, z), new THREE.Vector3(1.0, 1.7, 1.0));
+    this.addCollider(new THREE.Vector3(x, top + 1.7, z), new THREE.Vector3(1.0, 1.7, 1.0));
     return 2.4;
   }
 
@@ -663,7 +639,7 @@ export class LevelBuilder {
       this.prop(0.06, 0.6, 0.06, x - 0.7, top + 0.3, zi, 0x5a5a60);
       this.prop(0.06, 0.6, 0.06, x + 0.7, top + 0.3, zi, 0x5a5a60);
     }
-    this.physics.addBox(new THREE.Vector3(x, top + 0.45, z - (n - 1) * 0.6), new THREE.Vector3(0.85, 0.45, (n * 1.2) / 2));
+    this.addCollider(new THREE.Vector3(x, top + 0.45, z - (n - 1) * 0.6), new THREE.Vector3(0.85, 0.45, (n * 1.2) / 2));
     return n * 1.2;
   }
 
@@ -681,7 +657,7 @@ export class LevelBuilder {
         if (stack) this.prop(0.55, 0.55, 0.55, xi, top + 0.9, zi, pick(rng, [0x8b5a2b, 0x2f6fbf, 0xe0b020]), rng() * 0.5);
       }
     }
-    this.physics.addBox(new THREE.Vector3(x, top + 0.4, z - 0.7), new THREE.Vector3(0.7, 0.4, 1.05));
+    this.addCollider(new THREE.Vector3(x, top + 0.4, z - 0.7), new THREE.Vector3(0.7, 0.4, 1.05));
     return 2.2;
   }
 
@@ -700,7 +676,7 @@ export class LevelBuilder {
     // Tuyau de ventilation fumant
     this.propGeo(new THREE.CylinderGeometry(0.12, 0.12, 0.8, 8), this.matrix(x - facing * 0.6, top + 3.1, zc - 0.8), 0x5a5e66);
     this.steam.addVent(new THREE.Vector3(x - facing * 0.6, top + 3.55, zc - 0.8), 3.5);
-    this.physics.addBox(new THREE.Vector3(x, top + 1.3, zc), new THREE.Vector3(1.2, 1.3, 1.5));
+    this.addCollider(new THREE.Vector3(x, top + 1.3, zc), new THREE.Vector3(1.2, 1.3, 1.5));
     return 3;
   }
 
@@ -740,12 +716,12 @@ export class LevelBuilder {
       this.blinkMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.2, 0.2).multiplyScalar(LIGHTING.neon), toneMapped: false });
     }
     this.batchBox(this.blinkMaterial, 0.18, 0.18, 0.18, x, top + height + 0.1, z);
-    this.physics.addBox(new THREE.Vector3(x, top + height / 2, z), new THREE.Vector3(0.1, height / 2, 0.1));
+    this.addCollider(new THREE.Vector3(x, top + height / 2, z), new THREE.Vector3(0.1, height / 2, 0.1));
     return 1;
   }
 
   /** Guirlande d'ampoules colorées légèrement affaissée entre deux points. */
-  private stringLights(x0: number, z0: number, x1: number, z1: number, y: number, rng: Rng): void {
+  stringLights(x0: number, z0: number, x1: number, z1: number, y: number, rng: Rng): void {
     const len = Math.hypot(x1 - x0, z1 - z0);
     const n = Math.max(2, Math.floor(len / 0.35));
     const warm = rng() < 0.6;
@@ -777,17 +753,19 @@ export class LevelBuilder {
     scaleBoxUVs(geo, thickness, h, length, 4, 4);
     const mesh = new THREE.Mesh(geo, this.panelMaterial);
     mesh.position.set(x, BASE_Y + h / 2, cz);
-    this.scene.add(mesh);
-    this.physics.addBox(mesh.position.clone(), new THREE.Vector3(thickness / 2, h / 2, length / 2));
+    this.course.add(mesh);
+    this.addCollider(mesh.position.clone(), new THREE.Vector3(thickness / 2, h / 2, length / 2));
 
     const faceX = x + faceDir * (thickness / 2 + 0.015);
     const adHeight = 7;
     const adCenterY = top - 4.2;
     const width = Math.round(((length - 0.4) / adHeight) * 32);
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(length - 0.4, adHeight), this.signMaterial(this.billboard(ad, width), 1.05));
+    const adMaterial = this.signMaterial(this.billboard(ad, width), 1.05);
+    this.courseDisposables.push(adMaterial);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(length - 0.4, adHeight), adMaterial);
     plane.position.set(faceX, adCenterY, cz);
     plane.rotation.y = faceDir > 0 ? Math.PI / 2 : -Math.PI / 2;
-    this.scene.add(plane);
+    this.course.add(plane);
 
     // Bandes néon (haut / bas de la zone de course) + flèches
     const neon = this.neon(color, 4);
@@ -820,10 +798,11 @@ export class LevelBuilder {
 
     const geo = new THREE.BoxGeometry(width, h, thickness);
     const adMat = this.signMaterial(this.billboard('glide', Math.round((width / h) * 32)), 1.05);
+    this.courseDisposables.push(adMat);
     const mesh = new THREE.Mesh(geo, [this.panelMaterial, this.panelMaterial, this.panelMaterial, this.panelMaterial, adMat, adMat]);
     mesh.position.set(cx, cy, z);
-    this.scene.add(mesh);
-    this.physics.addBox(new THREE.Vector3(cx, cy, z), new THREE.Vector3(width / 2, h / 2, thickness / 2));
+    this.course.add(mesh);
+    this.addCollider(new THREE.Vector3(cx, cy, z), new THREE.Vector3(width / 2, h / 2, thickness / 2));
 
     // Bord inférieur lumineux + bandes d'avertissement
     const warn = this.neon(NEON.orange, 5);
@@ -845,17 +824,18 @@ export class LevelBuilder {
 
     const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.65, 0.08, 32), this.panelMaterial);
     base.position.set(position.x, position.y + 0.04, position.z);
-    this.scene.add(base);
+    this.course.add(base);
 
     const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(NEON.green).multiplyScalar(4 * LIGHTING.neon), toneMapped: false });
+    this.courseDisposables.push(ringMat);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.06, 8, 48, Math.PI * 1.6), ringMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(position.x, position.y + 0.1, position.z);
-    this.scene.add(ring);
+    this.course.add(ring);
     const inner = new THREE.Mesh(new THREE.CircleGeometry(0.7, 32), this.neon(NEON.green, 1.6));
     inner.rotation.x = -Math.PI / 2;
     inner.position.set(position.x, position.y + 0.09, position.z);
-    this.scene.add(inner);
+    this.course.add(inner);
 
     const columnMat = new THREE.ShaderMaterial({
       uniforms: {
@@ -887,9 +867,10 @@ export class LevelBuilder {
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
     });
+    this.courseDisposables.push(columnMat);
     const column = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.25, 5, 32, 1, true), columnMat);
     column.position.set(position.x, position.y + 2.5, position.z);
-    this.scene.add(column);
+    this.course.add(column);
     this.padVisuals.push({ ring, column: columnMat, pad });
   }
 
@@ -922,27 +903,29 @@ export class LevelBuilder {
       fog: false,
     });
     this.beaconMaterials.push(mat);
+    this.courseDisposables.push(mat);
     const column = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 140, 48, 1, true), mat);
     column.position.set(position.x, position.y + 70, position.z);
-    this.scene.add(column);
+    this.course.add(column);
 
     const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(NEON.yellow).multiplyScalar(4 * LIGHTING.neon), toneMapped: false });
+    this.courseDisposables.push(ringMat);
     for (let i = 0; i < 2; i++) {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(2.6 + i * 0.5, 0.06, 8, 64, Math.PI * (1.2 + i * 0.4)), ringMat);
       ring.rotation.x = -Math.PI / 2;
       const holder = new THREE.Group();
       holder.position.set(position.x, position.y + 0.12 + i * 0.05, position.z);
       holder.add(ring);
-      this.scene.add(holder);
+      this.course.add(holder);
       this.spinners.push({ object: holder, speed: i === 0 ? 1.2 : -0.8 });
     }
     this.addHoloSign(['◆ EXTRACTION ◆'], new THREE.Vector3(position.x, position.y + 4.5, position.z), NEON.yellow, 5);
     const light = new THREE.PointLight(NEON.yellow, 18 * LIGHTING.pointLights, 25, 2);
     light.position.set(position.x, position.y + 3, position.z);
-    this.scene.add(light);
+    this.course.add(light);
   }
 
-  private addHoloSign(lines: string[], position: THREE.Vector3, color: number, width: number): void {
+  addHoloSign(lines: string[], position: THREE.Vector3, color: number, width: number): void {
     const hex = '#' + new THREE.Color(color).getHexString();
     const { texture, aspect } = createHoloTexture(lines, hex);
     const mat = new THREE.SpriteMaterial({
@@ -952,46 +935,57 @@ export class LevelBuilder {
       depthWrite: false,
       opacity: 0.92,
     });
+    this.courseDisposables.push(mat, texture);
     const sprite = new THREE.Sprite(mat);
     sprite.position.copy(position);
     this.exclusions.push({ x: position.x, z: position.z, r: 1.5 });
     sprite.scale.set(width, width / aspect, 1);
-    this.scene.add(sprite);
+    this.course.add(sprite);
     this.flickers.push({ material: mat, base: 0.92, phase: this.rng() * 100 });
   }
 
-  private addNeonLight(position: THREE.Vector3, color: number, intensity: number, distance: number): void {
+  addNeonLight(position: THREE.Vector3, color: number, intensity: number, distance: number): void {
     // Sur mobile, chaque lumière ponctuelle alourdit tous les shaders : on s'en passe.
     if (!QUALITY.neonLights) return;
     const light = new THREE.PointLight(color, intensity * LIGHTING.pointLights, distance, 1.6);
     light.position.copy(position);
-    this.scene.add(light);
+    this.course.add(light);
   }
 
-  /** Enseignes en pixel art sur les façades visibles depuis le parcours. */
-  private addCourseSigns(): void {
-    // texte, schéma de couleurs, x, y, z de la façade avant (+Z) de l'immeuble
-    const signs: [string, number, number, number, number][] = [
-      ['HOTEL', 3, 5, -5, -38],
-      ['RAMEN', 2, -6, -7, -38],
-      ['24H', 7, 6, -6, -104],
-      ['KARAOKE', 4, -5, -9, -104],
-      ['CLUB', 0, 5, 2, -146],
-      ['BAR', 1, -5, 1, -146],
-      ['CAFE', 5, 6, -3, -206],
-      ['NOODLES', 8, -5, -2, -206],
-      ['KALLIOPE', 6, -5, 4, -276],
-      ['LIVE', 0, 7, 3, -276],
-    ];
-    for (const [text, scheme, x, y, z] of signs) {
-      const vertical = text.length <= 4;
-      const { texture, aspect } = createPixelSign(text, SIGN_SCHEMES[scheme], vertical);
+  /**
+   * Enseignes en pixel art sur les façades avant visibles depuis le parcours :
+   * celles du niveau, ou à défaut deux par grand immeuble (générées).
+   */
+  private addSigns(def: LevelDef): void {
+    let signs = def.signs;
+    if (!signs) {
+      const rng = createRng(def.id.length * 977 + def.buildings.length);
+      const words = ['HOTEL', 'RAMEN', '24H', 'KARAOKE', 'CLUB', 'BAR', 'CAFE', 'NOODLES', 'LIVE', 'SUSHI', 'TAXI', 'BAO', 'DISCO', 'TATTOO', 'ARCADE', 'PHARMA'];
+      signs = [];
+      def.buildings.forEach((b, i) => {
+        if (i === 0 || b.d < 20) return;
+        const front = b.z + b.d / 2;
+        for (const side of [-1, 1]) {
+          signs!.push({
+            text: words[Math.floor(rng() * words.length)],
+            scheme: Math.floor(rng() * SIGN_SCHEMES.length),
+            x: b.x + side * (b.w / 2 - 3),
+            y: b.top - 4 - rng() * 5,
+            z: front,
+          });
+        }
+      });
+    }
+    for (const sign of signs) {
+      const vertical = sign.text.length <= 4;
+      const { texture, aspect } = createPixelSign(sign.text, SIGN_SCHEMES[sign.scheme % SIGN_SCHEMES.length], vertical);
       const mat = this.signMaterial(texture, 1.6);
       mat.transparent = true;
+      this.courseDisposables.push(mat, texture);
       const h = vertical ? 6.4 : 1.6;
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(h * aspect, h), mat);
-      plane.position.set(x, y, z + 0.06);
-      this.scene.add(plane);
+      plane.position.set(sign.x, sign.y, sign.z + 0.06);
+      this.course.add(plane);
       this.flickers.push({ material: mat, base: 1, phase: this.rng() * 100 });
     }
   }

@@ -639,3 +639,87 @@ export const sceneSurvival: Scene = (ctx, t) => {
   pips(ctx, 42, 5, 3, hp, C.yellow);
   rain(ctx, t);
 };
+
+/** Petit chat néon (pattes en x, y). */
+function neonCat(ctx: Ctx, x: number, y: number, t: number): void {
+  const c = '#ff7ad9';
+  const bob = Math.round(Math.sin(t * 4) * 0.6);
+  px(ctx, x - 3, y - 5 + bob, 1, 1, c);
+  px(ctx, x + 1, y - 5 + bob, 1, 1, c);
+  px(ctx, x - 3, y - 4 + bob, 5, 3, c);
+  px(ctx, x - 2, y - 3 + bob, 1, 1, '#ffffff');
+  px(ctx, x, y - 3 + bob, 1, 1, '#ffffff');
+  px(ctx, x - 3, y - 1, 5, 1, c);
+  px(ctx, x + 2, y - 3, 1, 3, '#b8408f');
+}
+
+/** La Plaza : marchand, chat caché, sortie vers le niveau suivant. */
+export const scenePlaza: Scene = (ctx, t) => {
+  const period = 7;
+  const tt = t % period;
+  sky(ctx);
+  skyline(ctx, 10);
+  roof(ctx, 0, 70, 160, C.magenta);
+  // Allée pavée
+  for (let x = 0; x < 160; x += 6) px(ctx, x, 70, 5, 1, '#8a7a6a');
+  // Échoppe : comptoir, auvent rayé, enseigne, marchand
+  px(ctx, 18, 52, 30, 18, '#2a4a4a');
+  for (let i = 0; i < 6; i++) px(ctx, 16 + i * 6, 48, 6, 4, i % 2 === 0 ? C.green : C.white);
+  px(ctx, 20, 62, 26, 8, '#d8f0f0');
+  px(ctx, 30, 55, 6, 6, '#f1c7a0');
+  px(ctx, 30, 54, 6, 2, '#1a1a22');
+  px(ctx, 30, 57, 6, 1, C.green);
+  text(ctx, 'SHOP', 25, 41, C.green);
+  // Arbre en fleurs et caisse avec un chat
+  px(ctx, 70, 54, 3, 16, '#5a3a24');
+  px(ctx, 62, 44, 18, 11, '#ff9ac8');
+  px(ctx, 66, 40, 11, 6, '#f27ab8');
+  px(ctx, 94, 62, 12, 8, '#8a5a2a');
+  px(ctx, 94, 62, 12, 1, '#5a3a1a');
+  const catTaken = tt > 4.0;
+  if (!catTaken) neonCat(ctx, 100, 62, t);
+  beacon(ctx, 146, 70, t);
+  text(ctx, 'SORTIE', 128, 44, C.yellow);
+
+  let x: number;
+  let y = 70;
+  let pose: Pose = 'run';
+  if (tt < 1.4) x = 4 + (tt / 1.4) * 48;
+  else if (tt < 2.6) {
+    x = 52;
+    pose = 'stand';
+  } else if (tt < 3.6) x = 52 + ((tt - 2.6) / 1.0) * 34;
+  else if (tt < 4.0) {
+    const u = (tt - 3.6) / 0.4;
+    x = 86 + u * 12;
+    y = arc(u, 70, 62, 10);
+    pose = 'jump';
+  } else if (tt < 4.6) {
+    x = 98;
+    y = 62;
+    pose = 'stand';
+  } else if (tt < 4.9) {
+    const u = (tt - 4.6) / 0.3;
+    x = 98 + u * 12;
+    y = arc(u, 62, 70, 6);
+    pose = 'jump';
+  } else if (tt < 6.0) x = 110 + ((tt - 4.9) / 1.1) * 36;
+  else {
+    x = 146;
+    pose = 'stand';
+  }
+  runner(ctx, x, y, pose, t);
+
+  if (tt > 1.5 && tt < 2.6) {
+    const k = (tt - 1.5) / 1.1;
+    text(ctx, '-160', 50, 36 - k * 6, C.yellow);
+    text(ctx, 'DASH+', 46, 28 - k * 6, C.green);
+  }
+  if (tt > 4.0 && tt < 5.0) {
+    burst(ctx, 100, 56, (tt - 4.0) / 1.0, ['#ff7ad9', C.yellow, C.white]);
+    text(ctx, '+30', 94, 44 - (tt - 4.0) * 6, C.yellow);
+  }
+  if (tt > 6.0) burst(ctx, 146, 60, (tt - 6.0) / 1.0, [C.yellow, C.white, C.amber]);
+  text(ctx, `${tt < 1.5 ? 212 : tt < 4.0 ? 52 : 82} ¢`, 4, 4, C.yellow);
+  rain(ctx, t, 0.5);
+};
