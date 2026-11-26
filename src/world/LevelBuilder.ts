@@ -235,14 +235,19 @@ export class LevelBuilder {
     this.roofs.length = 0;
   }
 
+  /** Zone gardée libre d'accessoires de toit (secrets, points d'appel). */
+  reserve(x: number, z: number, radius: number): void {
+    this.exclusions.push({ x, z, r: radius });
+  }
+
   /** Bouche de vapeur (supprimée au changement de parcours). */
   addSteamVent(position: THREE.Vector3, rate = 5): void {
     this.steam.addVent(position, rate);
   }
 
   /** Collision statique appartenant au parcours courant. */
-  addCollider(center: THREE.Vector3, halfExtents: THREE.Vector3, rotationY = 0): void {
-    this.courseColliders.push(this.physics.addBox(center, halfExtents, rotationY));
+  addCollider(center: THREE.Vector3, halfExtents: THREE.Vector3, rotationY = 0, rotationX = 0): void {
+    this.courseColliders.push(this.physics.addBox(center, halfExtents, rotationY, rotationX));
   }
 
   reset(): void {

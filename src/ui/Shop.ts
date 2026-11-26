@@ -5,6 +5,10 @@ export interface ShopItem {
   desc: string;
   price: number;
   owned: boolean;
+  /** Déjà possédé mais pas équipé (encres) : bouton « ÉQUIPER ». */
+  equip?: boolean;
+  /** Libellé quand l'article est possédé (défaut « INSTALLÉ ✓ »). */
+  ownedLabel?: string;
 }
 
 export interface ShopVendor {
@@ -85,10 +89,12 @@ export class Shop {
     const v = this.vendor!;
     const rows = items
       .map((it) => {
-        const state = it.owned ? 'owned' : credits >= it.price ? 'buyable' : 'poor';
+        const state = it.owned ? 'owned' : it.equip || credits >= it.price ? 'buyable' : 'poor';
         const btn = it.owned
-          ? '<span class="shop-owned">INSTALLÉ ✓</span>'
-          : `<button class="shop-buy" type="button" data-buy="${it.id}" ${credits >= it.price ? '' : 'disabled'}>${it.price} ¢</button>`;
+          ? `<span class="shop-owned">${it.ownedLabel ?? 'INSTALLÉ ✓'}</span>`
+          : it.equip
+            ? `<button class="shop-buy" type="button" data-buy="${it.id}">ÉQUIPER</button>`
+            : `<button class="shop-buy" type="button" data-buy="${it.id}" ${credits >= it.price ? '' : 'disabled'}>${it.price === 0 ? 'GRATUIT' : `${it.price} ¢`}</button>`;
         return `<div class="shop-item ${state}"><div class="shop-info"><div class="shop-name">${it.name}</div><div class="shop-desc">${it.desc}</div></div>${btn}</div>`;
       })
       .join('');

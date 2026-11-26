@@ -21,6 +21,26 @@ export interface FinishStats {
   isRecord: boolean;
   kills: number;
   totalEnemies: number;
+  /** « SECRETS DU NIVEAU 1/2 » (vide si le niveau n'en a pas). */
+  secrets?: string;
+}
+
+/** Log audio délivré par la balise (fragment du message de Sacha). */
+export interface FinishLog {
+  code: string;
+  title: string;
+  from: string;
+  text: string;
+  /** Première écoute : texte déroulé ; sinon rappel compact. */
+  first: boolean;
+}
+
+/** Progression de l'histoire affichée sur l'écran titre. */
+export interface StoryStatus {
+  sibling: string;
+  fragments: number;
+  secrets: number;
+  secretTotal: number;
 }
 
 /** Carte de sélection de niveau sur l'écran titre. */
@@ -36,6 +56,7 @@ export interface LevelCard {
 const WEAPON_LABELS: Record<WeaponId, string> = {
   blades: 'LAMES MANTIS',
   pistol: 'PISTOLET CYBER',
+  monowire: 'MONOWIRE',
 };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, parent?: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
@@ -62,6 +83,10 @@ export class HUD {
   onMenuClick: (() => void) | null = null;
   /** Appelé par le bouton « La Plaza » de l'écran titre. */
   onPlazaClick: (() => void) | null = null;
+  /** Ouvre le journal (écran titre, pause). */
+  onJournalClick: (() => void) | null = null;
+  /** Bascule frère / sœur pour Sacha. */
+  onSiblingClick: (() => void) | null = null;
 
   private readonly root: HTMLDivElement;
   private readonly levelLabel: HTMLDivElement;
@@ -81,6 +106,12 @@ export class HUD {
   private readonly credits: HTMLDivElement;
   private readonly prompt: HTMLDivElement;
   private readonly dialogue: HTMLDivElement;
+  private readonly objective: HTMLDivElement;
+  private readonly secretToast: HTMLDivElement;
+  private readonly fadeEl: HTMLDivElement;
+  private secretTimer: number | null = null;
+  private typeTimer: number | null = null;
+  private typeFull = '';
   private dialogueTimer: number | null = null;
   private lastCredits = -1;
   private lastTargets = '';
@@ -105,6 +136,7 @@ export class HUD {
     this.timer = el('div', 'hud-timer', top, '00:00.00');
     this.targets = el('div', 'hud-targets', top, 'CIBLES 0/0');
     this.credits = el('div', 'hud-credits', top, '0 ¢');
+    this.objective = el('div', 'hud-objective', top);
 
     this.crosshair = el('div', 'crosshair blades', this.root);
     for (let i = 0; i < 4; i++) el('span', `tick t${i}`, this.crosshair);
@@ -128,8 +160,8 @@ export class HUD {
     for (let i = 0; i < maxHealth; i++) this.healthPips.push(el('span', 'pip', this.hpBox));
 
     const right = el('div', 'hud-right', this.root);
-    (['blades', 'pistol'] as WeaponId[]).forEach((id, i) => {
-      const slot = el('div', 'weapon-slot', right);
+    (['blades', 'pistol', 'monowire'] as WeaponId[]).forEach((id, i) => {
+      const slot = el('div', `weapon-slot${id === 'monowire' ? ' locked' : ''}`, right);
       el('span', 'key', slot, String(i + 1));
       el('span', 'name', slot, WEAPON_LABELS[id]);
       this.weaponSlots.set(id, slot);
@@ -139,6 +171,8 @@ export class HUD {
     this.message = el('div', 'hud-message', this.root);
     this.prompt = el('div', 'hud-prompt', this.root);
     this.dialogue = el('div', 'hud-dialogue', this.root);
+    this.secretToast = el('div', 'hud-secret', this.root);
+    this.fadeEl = el('div', 'hud-fade', container);
     el('div', 'hud-hint', this.root, 'R : RECOMMENCER · ÉCHAP : PAUSE');
 
     this.overlay = el('div', 'overlay', container);
@@ -177,6 +211,22 @@ export class HUD {
         this.onPlazaClick?.();
         return;
       }
+      if (target?.closest('[data-act="journal"]')) {
+        e.stopPropagation();
+        this.onJournalClick?.();
+        return;
+      }
+      if (target?.closest('[data-act="sibling"]')) {
+        e.stopPropagation();
+        this.onSiblingClick?.();
+        return;
+      }
+      if (target?.closest('[data-act="log"]')) {
+        // Toucher le log affiche tout le texte d'un coup
+        e.stopPropagation();
+        this.finishTyping();
+        return;
+      }
       this.onOverlayClick?.();
     });
 
@@ -195,6 +245,12 @@ export class HUD {
 
   setVisible(visible: boolean): void {
     this.root.classList.toggle('hidden', !visible);
+  }
+
+  /** Affiche l'emplacement des armes débloquées (monowire acheté à l'armurerie). */
+  setUnlocked(ids: Iterable<WeaponId>): void {
+    const set = new Set(ids);
+    for (const [wid, slot] of this.weaponSlots) slot.classList.toggle('locked', !set.has(wid));
   }
 
   setWeapon(id: WeaponId): void {
@@ -250,6 +306,33 @@ export class HUD {
     }
   }
 
+  /** Objectif en cours à la Plaza (course, colis), null pour le masquer. */
+  setObjective(text: string | null): void {
+    const t = text ?? '';
+    if (this.objective.textContent === t) return;
+    this.objective.textContent = t;
+    this.objective.classList.toggle('show', text !== null);
+  }
+
+  /** Fondu au noir bref (ascenseurs). */
+  fade(): void {
+    this.fadeEl.classList.remove('show');
+    void this.fadeEl.offsetWidth;
+    this.fadeEl.classList.add('show');
+  }
+
+  /** Petit encart discret : secret trouvé. */
+  showSecret(title: string, text: string): void {
+    this.secretToast.innerHTML = '';
+    el('div', 'sec-title', this.secretToast, `◆ ${title}`);
+    el('div', 'sec-text', this.secretToast, text);
+    this.secretToast.classList.remove('show');
+    void this.secretToast.offsetWidth;
+    this.secretToast.classList.add('show');
+    if (this.secretTimer !== null) window.clearTimeout(this.secretTimer);
+    this.secretTimer = window.setTimeout(() => this.secretToast.classList.remove('show'), 6500);
+  }
+
   /** Invite d'interaction (« E : PARLER À … »), null pour la masquer. */
   setPrompt(text: string | null): void {
     const t = text ?? '';
@@ -276,16 +359,23 @@ export class HUD {
     this.dialogue.classList.remove('show');
   }
 
-  /** Jauge circulaire de l'attaque chargée autour du réticule. */
-  setCharge(level: number, visible: boolean): void {
+  /**
+   * Jauge circulaire autour du réticule : charge en cours (lames ou chevrotine),
+   * ou recharge (`cooldown` de 0 à 1, -1 = disponible) affichée en discret.
+   */
+  setCharge(level: number, visible: boolean, cooldown = -1, kind: 'blades' | 'pistol' = 'blades'): void {
     const ready = visible && level >= 1;
-    const q = visible ? Math.min(99, Math.floor(level * 100)) : -1;
-    const key = ready ? 1000 : q;
+    const cooling = !visible && cooldown >= 0;
+    const q = visible ? Math.min(99, Math.floor(level * 100)) : cooling ? Math.floor(cooldown * 100) : -1;
+    const key = (ready ? 1000 : q) + (cooling ? 2000 : 0) + (kind === 'pistol' ? 5000 : 0);
     if (key === this.lastCharge) return;
     this.lastCharge = key;
-    this.chargeRing.classList.toggle('show', visible);
+    this.chargeRing.classList.toggle('show', visible || cooling);
     this.chargeRing.classList.toggle('ready', ready);
+    this.chargeRing.classList.toggle('cooling', cooling);
+    this.chargeRing.classList.toggle('pistol', kind === 'pistol');
     this.chargeLabel.classList.toggle('show', ready);
+    this.chargeLabel.textContent = kind === 'pistol' ? 'CHEVROTINE !' : 'RELÂCHE !';
     this.chargeRing.style.setProperty('--charge', String(ready ? 100 : Math.max(0, q)));
   }
 
@@ -317,7 +407,7 @@ export class HUD {
     this.levelLabel.textContent = text;
   }
 
-  showStart(levels: LevelCard[], selected: number, credits: number): void {
+  showStart(levels: LevelCard[], selected: number, credits: number, story: StoryStatus): void {
     const quickKeys = this.touch
       ? ''
       : `<div class="quick-keys">
@@ -349,9 +439,12 @@ export class HUD {
         <div class="level-grid">${cards}</div>
         ${quickKeys}
         <div class="cta">${this.touch ? '[ TOUCHE UN NIVEAU POUR TE CONNECTER ]' : '[ CLIQUE SUR UN NIVEAU POUR TE CONNECTER ]'}</div>
+        <div class="story-line">MESSAGE DE SACHA ${story.fragments}/3 · SECRETS ${story.secrets}/${story.secretTotal}</div>
         <div class="btn-row">
           <button class="overlay-btn plaza-btn" data-act="plaza" type="button">◆ LA PLAZA · ${credits} ¢</button>
+          <button class="overlay-btn" data-act="journal" type="button">▤ JOURNAL</button>
           <button class="overlay-btn" data-act="tutorial" type="button">▶ TUTORIEL &amp; COMMANDES</button>
+          <button class="overlay-btn sibling-btn" data-act="sibling" type="button">SACHA : ${story.sibling} ⇄</button>
         </div>
         ${this.touch ? '<div class="sub">Plein écran et mode paysage recommandés</div>' : ''}
       </div>`;
@@ -366,6 +459,7 @@ export class HUD {
         <div class="cta">${this.touch ? '[ TOUCHE POUR REPRENDRE ]' : '[ CLIQUE POUR REPRENDRE ]'}</div>
         <div class="btn-row">
           <button class="overlay-btn" data-act="restart" type="button">↻ RECOMMENCER</button>
+          <button class="overlay-btn" data-act="journal" type="button">▤ JOURNAL</button>
           <button class="overlay-btn" data-act="menu" type="button">☰ NIVEAUX</button>
         </div>
         ${this.touch ? '' : '<div class="sub">R : recommencer</div>'}
@@ -386,22 +480,62 @@ export class HUD {
       </div>`;
   }
 
-  showFinish(s: FinishStats, nextLabel: string, reward: Reward): void {
+  showFinish(s: FinishStats, nextLabel: string, reward: Reward, log: FinishLog | null = null): void {
     this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show finish';
+    let logHtml = '';
+    if (log && log.first) {
+      logHtml = `
+        <div class="audio-log" data-act="log">
+          <div class="log-head"><span class="log-wave"><i></i><i></i><i></i><i></i><i></i></span>LOG AUDIO · ${log.code} · ${log.title}</div>
+          <div class="log-from">${log.from}</div>
+          <div class="log-text"></div>
+        </div>`;
+    } else if (log) {
+      logHtml = `<div class="log-compact">✓ ${log.code} · ${log.title} — à réécouter dans le journal</div>`;
+    }
     this.overlay.innerHTML = `
-      <div class="panel small">
+      <div class="panel small${log && log.first ? ' with-log' : ''}">
+        <div class="finish-main">
         <div class="title small">EXTRACTION RÉUSSIE</div>
         <div class="big-time">${HUD.formatTime(s.time)}</div>
         <div class="stats">${s.isRecord ? '★ NOUVEAU RECORD ★' : `RECORD : ${s.best !== null ? HUD.formatTime(s.best) : '--'}`}</div>
-        <div class="stats">CIBLES ÉLIMINÉES ${s.kills}/${s.totalEnemies}</div>
+        <div class="stats">CIBLES ÉLIMINÉES ${s.kills}/${s.totalEnemies}${s.secrets ? ` · ${s.secrets}` : ''}</div>
         <div class="reward"><span class="reward-total">+${reward.total} ¢</span><span class="reward-lines">${reward.lines.join(' · ')}</span></div>
         <button class="overlay-btn next-btn" data-act="next" type="button">${nextLabel}</button>
         <div class="cta">${this.touch ? '[ TOUCHE POUR REJOUER ]' : '[ R ] OU CLIC : REJOUER'}</div>
         <div class="btn-row">
           <button class="overlay-btn" data-act="menu" type="button">☰ NIVEAUX</button>
         </div>
+        </div>
+        ${logHtml}
       </div>`;
+    if (log && log.first) this.typeLog(log.text);
+  }
+
+  /** Texte du log déroulé à la machine à écrire (le jeu reste maître du rythme). */
+  private typeLog(text: string): void {
+    this.stopTyping();
+    this.typeFull = text;
+    const target = this.overlay.querySelector('.log-text');
+    if (!target) return;
+    let shown = 0;
+    this.typeTimer = window.setInterval(() => {
+      shown = Math.min(text.length, shown + 2);
+      target.textContent = text.slice(0, shown);
+      if (shown >= text.length) this.stopTyping();
+    }, 30);
+  }
+
+  private finishTyping(): void {
+    const target = this.overlay.querySelector('.log-text');
+    if (target && this.typeFull) target.textContent = this.typeFull;
+    this.stopTyping();
+  }
+
+  private stopTyping(): void {
+    if (this.typeTimer !== null) window.clearInterval(this.typeTimer);
+    this.typeTimer = null;
   }
 
   showLoading(text: string): void {
@@ -411,6 +545,7 @@ export class HUD {
   }
 
   hideOverlay(): void {
+    this.stopTyping();
     this.overlay.className = 'overlay';
     this.overlay.innerHTML = '';
   }

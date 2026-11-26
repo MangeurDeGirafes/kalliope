@@ -177,6 +177,7 @@ export class MantisArm {
   private readonly bladeMaterial: THREE.MeshStandardMaterial;
   private readonly glowMaterial: THREE.MeshBasicMaterial;
   private readonly glowColor: THREE.Color;
+  private readonly glowSoft: THREE.MeshBasicMaterial;
   private readonly tmpA = new THREE.Vector3();
   private readonly tmpB = new THREE.Vector3();
 
@@ -186,6 +187,7 @@ export class MantisArm {
     this.glowColor = color.clone();
     this.glowMaterial = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(4 * LIGHTING.weaponGlow), toneMapped: false });
     const glowSoft = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(1.8 * LIGHTING.weaponGlow), toneMapped: false });
+    this.glowSoft = glowSoft;
     this.bladeMaterial = new THREE.MeshStandardMaterial({
       color: 0x0a0f15,
       metalness: 0.95,
@@ -216,6 +218,13 @@ export class MantisArm {
     this.femurPivot.rotation.x = pose.femur;
     this.kneePivot.rotation.x = pose.knee;
     this.updatePiston();
+  }
+
+  /** Change la couleur néon de la lame (encres cosmétiques). */
+  setColor(color: THREE.Color): void {
+    this.glowColor.copy(color);
+    this.glowSoft.color.copy(color).multiplyScalar(1.8 * LIGHTING.weaponGlow);
+    this.bladeMaterial.emissive.copy(color);
   }
 
   /** Pulsation lumineuse (0..1). */

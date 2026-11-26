@@ -162,6 +162,54 @@ export class AudioSynthesizer {
     this.tone({ type: 'sine', from: 90, to: 45, duration: 0.12, volume: 0.3 });
   }
 
+  /** Décharge de chevrotine : souffle grave + claquement large. */
+  playShotgun(): void {
+    this.noise({ duration: 0.28, volume: 0.55, type: 'lowpass', from: 3200, to: 300, q: 0.6 });
+    this.tone({ type: 'square', from: 900, to: 70, duration: 0.22, volume: 0.2 });
+    this.tone({ type: 'sine', from: 70, to: 30, duration: 0.3, volume: 0.42 });
+    this.noise({ duration: 0.12, volume: 0.3, type: 'highpass', from: 4000, to: 1800, q: 0.5, delay: 0.02 });
+  }
+
+  /** Claquement du monowire : sifflement aigu puis fouet. */
+  playWhip(): void {
+    this.tone({ type: 'sawtooth', from: 900, to: 4200, duration: 0.16, volume: 0.05 });
+    this.noise({ duration: 0.1, volume: 0.45, type: 'highpass', from: 6000, to: 2500, q: 0.8, delay: 0.14 });
+    this.tone({ type: 'square', from: 2200, to: 600, duration: 0.06, volume: 0.08, delay: 0.15 });
+  }
+
+  /** Secret découvert : carillon doux. */
+  playSecret(): void {
+    this.tone({ type: 'sine', from: 660, to: 660, duration: 0.5, volume: 0.07, raw: true });
+    this.tone({ type: 'sine', from: 990, to: 990, duration: 0.7, volume: 0.06, delay: 0.12, raw: true });
+    this.tone({ type: 'triangle', from: 1320, to: 1320, duration: 0.9, volume: 0.035, delay: 0.24, raw: true });
+  }
+
+  /** Ouverture d'un log audio : grésillement radio puis tonalité. */
+  playLogStart(): void {
+    this.noise({ duration: 0.6, volume: 0.12, type: 'bandpass', from: 1800, to: 900, q: 0.8, raw: true });
+    this.tone({ type: 'sine', from: 880, to: 880, duration: 0.18, volume: 0.05, delay: 0.55, raw: true });
+    this.tone({ type: 'sine', from: 1175, to: 1175, duration: 0.25, volume: 0.045, delay: 0.72, raw: true });
+  }
+
+  /** Vieille platine : petit accord lo-fi égrené. */
+  playVinyl(): void {
+    const notes = [262, 330, 392, 494, 392, 330, 294, 370, 440];
+    notes.forEach((f, i) => this.tone({ type: 'triangle', from: f, to: f * 0.995, duration: 0.5, volume: 0.05, delay: i * 0.22, raw: true }));
+    this.noise({ duration: 2.2, volume: 0.025, type: 'bandpass', from: 3000, to: 2500, q: 0.4, raw: true });
+  }
+
+  /** Ascenseur / porte coulissante. */
+  playElevator(): void {
+    this.tone({ type: 'sine', from: 523, to: 523, duration: 0.2, volume: 0.06, raw: true });
+    this.tone({ type: 'sine', from: 784, to: 784, duration: 0.3, volume: 0.05, delay: 0.18, raw: true });
+    this.noise({ duration: 0.5, volume: 0.08, type: 'lowpass', from: 600, to: 200, q: 0.7, raw: true });
+  }
+
+  /** On frappe à une porte. */
+  playKnock(): void {
+    for (let i = 0; i < 3; i++) this.tone({ type: 'sine', from: 160, to: 90, duration: 0.08, volume: 0.25, delay: i * 0.16, raw: true });
+  }
+
   playJump(): void {
     this.tone({ type: 'sine', from: 220, to: 420, duration: 0.12, volume: 0.12 });
     this.noise({ duration: 0.1, volume: 0.12, type: 'lowpass', from: 1800, to: 600, q: 0.5 });

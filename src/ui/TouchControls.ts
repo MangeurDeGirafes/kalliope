@@ -8,6 +8,7 @@ const ICONS = {
   blades:
     '<path d="M3 21 L9 13 L13 5 L15 3"/><path d="M13 5 L19 8 Q22 11 19 16 L17 13"/><path d="M15 9 l-1 2 M17 10 l-1 2"/>',
   pistol: '<path d="M3 8 h15 l3 -2 v6 h-9 l-2 6 h-4 l2 -6 h-5 z"/><path d="M9 12 v2"/>',
+  monowire: '<path d="M4 20 l3 -3"/><circle cx="8.5" cy="15.5" r="2"/><path d="M10 14 c4 -6 6 2 10 -6"/><path d="M20 8 l1 -3"/>',
   jump: '<path d="M6 13 l6 -6 l6 6"/><path d="M6 19 l6 -6 l6 6"/>',
   slide: '<path d="M4 5 l6 9 h10"/><path d="M16 10 l4 4 l-4 4"/><path d="M4 20 h9"/>',
   dash: '<path d="M4 6 l6 6 l-6 6"/><path d="M11 6 l6 6 l-6 6"/><path d="M18 6 v12"/>',
@@ -101,7 +102,7 @@ export class TouchControls {
       { key: 'slide', label: 'GLISSE', icon: ICONS.slide, action: 'slide', lookThrough: true },
       { key: 'dash', label: 'DASH', icon: ICONS.dash, action: 'dash', lookThrough: true },
       { key: 'sandevistan', label: 'SANDEVISTAN', icon: ICONS.sandevistan, mouse: MouseButton.Right },
-      { key: 'swap', label: 'ARME', icon: ICONS.swap, tap: () => this.pulseAction(this.weapon === 'blades' ? 'weapon2' : 'weapon1') },
+      { key: 'swap', label: 'ARME', icon: ICONS.swap, tap: () => this.pulseAction('cycleWeapon') },
       { key: 'restart', label: '', icon: ICONS.restart, tap: () => this.pulseAction('restart') },
       { key: 'pause', label: '', icon: ICONS.pause, tap: () => this.onPause?.() },
       { key: 'interact', label: 'PARLER', icon: ICONS.talk, tap: () => this.pulseAction('interact') },
@@ -129,7 +130,7 @@ export class TouchControls {
     if (state.weapon !== this.weapon) {
       this.weapon = state.weapon;
       const attack = this.buttons.get('attack');
-      if (attack) attack.el.querySelector('.icon')!.innerHTML = svg(state.weapon === 'blades' ? ICONS.blades : ICONS.pistol);
+      if (attack) attack.el.querySelector('.icon')!.innerHTML = svg(ICONS[state.weapon]);
     }
     const sand = this.buttons.get('sandevistan');
     if (sand) {

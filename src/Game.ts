@@ -11,9 +11,14 @@ import { LevelBuilder } from './world/LevelBuilder';
 import type { LevelData } from './world/LevelBuilder';
 import { LEVELS } from './world/levels';
 import { CAT_COUNT, Plaza, plazaDef } from './world/Plaza';
-import type { Interactable } from './world/Plaza';
+import { buildSecret, raySphere } from './world/Secrets';
+import type { SecretRuntime } from './world/Secrets';
+import { PlazaDirector, SECRET_TOTAL } from './plaza/PlazaDirector';
+import { Journal } from './ui/Journal';
+import type { JournalData } from './ui/Journal';
+import { STORY_LOGS, logFlag, logForLevel, lorePages, siblingWords } from './story/Story';
 import { HUD } from './ui/HUD';
-import type { LevelCard } from './ui/HUD';
+import type { FinishLog, LevelCard } from './ui/HUD';
 import { TouchControls } from './ui/TouchControls';
 import { Tutorial } from './ui/Tutorial';
 import { Shop } from './ui/Shop';
@@ -25,7 +30,7 @@ import { CHARGED, COMBAT, SANDEVISTAN, TOUCH } from './config';
 
 type GameState = 'menu' | 'playing' | 'paused' | 'dead' | 'finished' | 'shop';
 
-const VENDORS: Record<VendorId, ShopVendor & { thanks: string[]; soldOut: string }> = {
+const VENDORS: Record<VendorId | 'indic', ShopVendor & { thanks: string[]; soldOut: string }> = {
   clinic: {
     name: 'DOC SATO',
     title: 'CLINIQUE D\'IMPLANTS',
@@ -42,10 +47,34 @@ const VENDORS: Record<VendorId, ShopVendor & { thanks: string[]; soldOut: string
     thanks: ['Et voilà, comme neuf. Mieux que neuf, même.', 'Un coup de clé, un coup de cœur. Suivant !', 'Fais-en bon usage, et pas sur mes clients.'],
     soldOut: 'Plus rien à bricoler sur toi, mon grand. File courir.',
   },
+  armory: {
+    name: 'KOVA',
+    title: 'ARMURERIE KOVA',
+    line: 'Tu veux du tranchant ou du bruit ? J\'ai les deux. Et du fil, pour les gourmets.',
+    color: '#ff3b3b',
+    thanks: ['Vendu. Pas de remboursement, pas de questions.', 'Prends soin de cette merveille. Elle, elle ne prendra pas soin de toi.', 'Bonne chasse, runner.'],
+    soldOut: 'Mon stock est vide, et c\'est toi qui l\'as vidé. Respect.',
+  },
+  ink: {
+    name: 'PIXEL',
+    title: 'NEON INK',
+    line: 'Une nouvelle couleur pour tes lames ? Ça change une silhouette sur un toit, crois-moi.',
+    color: '#ff7ad9',
+    thanks: ['Encre posée. Elle brille comme il faut.', 'Magnifique. Les drones vont te trouver très stylé.', 'Ça te va mieux que l\'uniforme d\'Aegis.'],
+    soldOut: 'Tu as toute ma palette. Reviens quand j\'aurai de nouvelles couleurs.',
+  },
+  indic: {
+    name: 'L\'INDIC',
+    title: 'L\'INDIC · TUYAUX',
+    line: 'Des secrets dorment dans les niveaux. Moi, je sais où. Toi, tu paies.',
+    color: '#2bffb0',
+    thanks: ['Noté. Tu ne tiens pas ça de moi.', 'Un bon tuyau, frais du jour.', 'Va voir par toi-même. Discrètement.'],
+    soldOut: 'Tu as tout trouvé. Je n\'ai plus rien à vendre… et ça m\'inquiète.',
+  },
 };
 
-const RAMEN_PRICE = 6;
-const CAT_REWARD = 30;
+const HINT_PRICE = 15;
+const SECRET_REWARD = 25;
 
 /** Ancien record (avant les niveaux multiples) : celui du premier parcours. */
 const LEGACY_BEST_TIME_KEY = 'neon-vertigo-best-time';
@@ -76,9 +105,12 @@ export class Game {
   private plaza: Plaza | null = null;
   /** Niveau vers lequel mène la sortie de la Plaza. */
   private plazaNext = 0;
-  private shopVendor: VendorId = 'clinic';
-  private interactCooldown = 0;
-  private readonly lastLine = new Map<string, number>();
+  private shopVendor: VendorId | 'indic' = 'clinic';
+  private readonly director: PlazaDirector;
+  private readonly journal: Journal;
+  /** Easter eggs du niveau en cours. */
+  private secrets: SecretRuntime[] = [];
+  private secretTime = 0;
 
   private state: GameState = 'menu';
   private lastTime = 0;
@@ -113,7 +145,7 @@ export class Game {
     this.weapons = new WeaponManager(this.engine, physics, this.enemies, this.particles, this.audio, this.player);
     this.hud = new HUD(document.body, STATS.dashMax, STATS.maxHealth, IS_TOUCH);
     this.shop = new Shop(document.body);
-    this.loadLevel(this.readLastLevel());
+    this.journal = new Journal(document.body);
 
     // Mode mobile : commandes tactiles, pas de pointer lock, visée assistée
     if (IS_TOUCH) {
@@ -125,7 +157,21 @@ export class Game {
       this.touch = null;
     }
 
-    this.tutorial = new Tutorial(document.body, IS_TOUCH);
+    this.tutorial = new Tutorial(document.body, IS_TOUCH, () => lorePages(this.progress.sibling));
+    this.director = new PlazaDirector({
+      hud: this.hud,
+      audio: this.audio,
+      input: this.input,
+      progress: this.progress,
+      player: this.player,
+      particles: this.particles,
+      touch: this.touch,
+      openShop: (vendor) => this.openShop(vendor),
+      teleport: (pos, yaw) => this.teleport(pos, yaw),
+      fragments: () => this.fragments(),
+    });
+    this.applyLoadout();
+    this.loadLevel(this.readLastLevel());
 
     this.wireEvents();
     this.weapons.reset();
@@ -178,10 +224,14 @@ export class Game {
     this.shop.onClose = () => {
       if (this.state !== 'shop') return;
       this.state = 'playing';
-      this.interactCooldown = 0.4;
+      this.director.holdInteract(0.4);
       this.touch?.setVisible(true);
       if (!this.touch) this.input.requestPointerLock();
     };
+    this.hud.onJournalClick = () => this.openJournal();
+    this.hud.onSiblingClick = () => this.toggleSibling();
+    this.journal.onToggleSibling = () => this.toggleSibling();
+    this.weapons.onShot = (origin, dir, distance) => this.checkSecretShot(origin, dir, distance);
 
     this.hud.onRestartClick = () => {
       this.audio.init();
@@ -375,6 +425,7 @@ export class Game {
       if (this.timerRunning) this.elapsed += realDt;
       this.checkJumpPads();
       this.checkKillPlane();
+      this.checkSecretsNearby();
       this.checkFinish();
     } else if (this.state === 'playing' && this.mode === 'plaza') {
       this.checkJumpPads();
@@ -387,6 +438,8 @@ export class Game {
     this.level.setViewport(this.engine.viewportHeight, this.engine.camera.fov);
     this.particles.update(worldDt);
     this.level.update(worldDt, this.engine.camera.position);
+    this.secretTime += worldDt;
+    for (const sec of this.secrets) sec.update(worldDt, this.secretTime);
 
     if (this.state === 'dead') {
       this.deathTimer += realDt;
@@ -414,7 +467,12 @@ export class Game {
       maxHealth: STATS.maxHealth,
       speed: this.player.horizontalSpeed,
     });
-    this.hud.setCharge(this.weapons.chargeLevel, this.weapons.chargeVisible || this.weapons.isChargeStriking);
+    this.hud.setCharge(
+      this.weapons.chargeLevel,
+      this.weapons.chargeVisible || this.weapons.isChargeStriking,
+      this.weapons.isChargeStriking ? -1 : this.weapons.chargeCooldownProgress,
+      this.weapons.current === 'pistol' ? 'pistol' : 'blades',
+    );
     this.touch?.update({
       weapon: this.weapons.current,
       sandevistanActive: this.player.sandevistanActive,
@@ -573,6 +631,23 @@ export class Game {
     this.progress.addCredits(reward.total);
     this.audio.stopLoops();
     this.audio.playFinish();
+
+    // Fragment du message de Sacha délivré par la balise
+    const story = logForLevel(this.currentLevel);
+    let log: FinishLog | null = null;
+    if (story) {
+      const first = this.progress.setFlag(logFlag(story.level));
+      log = {
+        code: story.code,
+        title: story.title,
+        from: story.fragment ? `MESSAGE DE SACHA · ${siblingWords(this.progress.sibling).Ton.toUpperCase()}` : 'NÉO-VÉRIDIAN',
+        text: story.text(this.progress.sibling, this.fragments()),
+        first,
+      };
+      if (first) this.audio.playLogStart();
+    }
+    const secrets = LEVELS[this.currentLevel].secrets ?? [];
+    const found = secrets.filter((sd) => this.progress.hasFlag(`secret-${sd.id}`)).length;
     this.hud.showFinish(
       {
         time: this.elapsed,
@@ -580,9 +655,11 @@ export class Game {
         isRecord,
         kills: this.kills,
         totalEnemies: this.enemies.totalCount,
+        secrets: secrets.length > 0 ? `SECRETS DU NIVEAU ${found}/${secrets.length}` : '',
       },
       'CONTINUER VERS LA PLAZA ▶',
       reward,
+      log,
     );
     this.input.exitPointerLock();
   }
@@ -608,8 +685,10 @@ export class Game {
     const plaza = new Plaza();
     this.enemies.clearAll();
     this.particles.clear();
+    this.secrets = [];
     this.levelData = this.level.loadLevel(def, (b) => plaza.build(b, (id) => this.progress.hasEgg(id)));
     this.plaza = plaza;
+    this.director.attach(plaza);
     this.engine.setTheme(def.theme);
     this.audio.setRainLevel(def.theme.rain);
     this.physics.step();
@@ -619,44 +698,13 @@ export class Game {
   }
 
   private updatePlaza(dt: number): void {
-    const plaza = this.plaza;
-    if (!plaza) return;
-    plaza.update(dt, this.player.position);
-    this.interactCooldown = Math.max(0, this.interactCooldown - dt);
-
+    if (!this.plaza) return;
     // Chute hors de la dalle : retour à l'entrée, sans pénalité
     if (this.player.feetY < -18) {
       this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
       this.hud.flashMessage('RETOUR À LA PLAZA', '#ff7ad9', 1200);
+      this.director.onRespawn();
     }
-
-    const cat = plaza.collectCat(this.player.position);
-    if (cat && this.progress.findEgg(cat.id)) {
-      const n = this.progress.countEggs('cat-');
-      this.progress.addCredits(CAT_REWARD);
-      this.audio.playMeow();
-      this.audio.playCoin();
-      vibrate(30);
-      this.particles.burst(cat.sprite.position, {
-        count: 40,
-        color: 0xff7ad9,
-        color2: 0xffd23b,
-        intensity: 3,
-        speedMin: 2,
-        speedMax: 6,
-        lifeMin: 0.3,
-        lifeMax: 0.7,
-        sizeMin: 0.04,
-        sizeMax: 0.09,
-        gravity: 3,
-        drag: 3,
-        direction: new THREE.Vector3(0, 1, 0),
-        spread: 1.4,
-      });
-      if (n >= CAT_COUNT) this.hud.flashMessage('TOUS LES CHATS ! VA VOIR MAMIE CHAT', '#ff7ad9', 2600);
-      else this.hud.flashMessage(`CHAT NÉON ${n}/${CAT_COUNT} · +${CAT_REWARD} ¢`, '#ff7ad9', 1800);
-    }
-
     // Sortie : la balise dorée lance le niveau suivant
     const f = this.levelData.finish;
     const dx = this.player.position.x - f.position.x;
@@ -666,170 +714,53 @@ export class Game {
       this.restart();
       return;
     }
+    this.director.update(dt);
+    this.hud.setObjective(this.director.objective());
+  }
 
-    const it = this.player.alive ? plaza.findInteractable(this.player.position, this.player.feetY) : null;
-    this.hud.setPrompt(it ? `${this.touch ? '' : 'E : '}${it.verb} ${it.name}` : null);
-    this.touch?.setInteract(it ? Game.interactLabel(it) : null);
-    if (it && this.interactCooldown <= 0 && this.input.wasPressed('interact')) {
-      this.interactCooldown = 0.35;
-      this.interactWith(it);
+  /** Ascenseurs de la Plaza : fondu au noir et téléportation. */
+  private teleport(position: THREE.Vector3, yaw: number): void {
+    this.hud.fade();
+    this.player.reset(position, yaw);
+    this.particles.clear();
+  }
+
+  private pickThanks(lines: readonly string[]): string {
+    return lines[Math.floor(Math.random() * lines.length)];
+  }
+
+  private shopItems(vendor: VendorId | 'indic'): ShopItem[] {
+    if (vendor === 'indic') {
+      // Un tuyau par secret encore introuvé (ou déjà acheté : il reste lisible)
+      const items: ShopItem[] = [];
+      LEVELS.forEach((l) => {
+        for (const sec of l.secrets ?? []) {
+          const found = this.progress.hasFlag(`secret-${sec.id}`);
+          const bought = this.progress.hasFlag(`hint-${sec.id}`);
+          if (found && !bought) continue;
+          items.push({
+            id: `hint-${sec.id}`,
+            name: `TUYAU · ${l.name}`,
+            desc: bought ? sec.hint : found ? 'Déjà trouvé.' : 'Un secret dort quelque part dans ce niveau.',
+            price: HINT_PRICE,
+            owned: bought,
+            ownedLabel: found ? 'TROUVÉ ✓' : 'NOTÉ ✓',
+          });
+        }
+      });
+      return items;
     }
-  }
-
-  private static interactLabel(it: Interactable): string {
-    switch (it.kind) {
-      case 'clinic':
-      case 'atelier':
-        return 'BOUTIQUE';
-      case 'ramen':
-        return 'RAMEN';
-      case 'arcade':
-        return 'JOUER';
-      case 'oracle':
-        return 'ORACLE';
-      case 'fountain':
-        return 'VŒU';
-      case 'statue':
-        return 'VOIR';
-      default:
-        return 'PARLER';
-    }
-  }
-
-  /** Réplique au hasard, jamais deux fois la même d'affilée. */
-  private pickLine(id: string, lines: readonly string[]): string {
-    let i = Math.floor(Math.random() * lines.length);
-    if (lines.length > 1 && i === this.lastLine.get(id)) i = (i + 1) % lines.length;
-    this.lastLine.set(id, i);
-    return lines[i];
-  }
-
-  private reward(amount: number): void {
-    this.progress.addCredits(amount);
-    this.audio.playCoin();
-  }
-
-  private interactWith(it: Interactable): void {
-    this.audio.playUiBlip();
-    const say = (text: string) => this.hud.showDialogue(it.name, text, it.color);
-    switch (it.kind) {
-      case 'clinic':
-      case 'atelier':
-        this.openShop(it.kind);
-        return;
-      case 'ramen': {
-        if (!this.progress.spend(RAMEN_PRICE)) {
-          this.audio.playDenied();
-          say(`Un bol, c'est ${RAMEN_PRICE} ¢. Reviens avec de quoi payer, mon chou.`);
-          return;
-        }
-        this.player.sandevistanEnergy = 1;
-        const first = this.progress.findEgg('ramen');
-        say(
-          first
-            ? 'Premier bol de la maison ? Non. Mais il te remplit le Sandevistan à ras bord.'
-            : this.pickLine(it.id, [
-                'Bouillon de 48 heures, nouilles de synthèse, amour véritable. Sandevistan rechargé.',
-                'Mange. Les toits seront encore là après.',
-                'Le secret ? Une pincée de néon râpé.',
-                'Paraît qu\'un chat dort derrière ma cuisine. Il adore l\'odeur du miso.',
-              ]),
-        );
-        return;
+    return UPGRADES.filter((u) => u.vendor === vendor).map((u) => {
+      const owned = this.progress.has(u.id);
+      if (u.ink) {
+        const equipped = this.progress.ink === u.id;
+        return { id: u.id, name: u.name, desc: u.desc, price: u.price, owned: owned && equipped, equip: owned && !equipped, ownedLabel: 'ÉQUIPÉE ✓' };
       }
-      case 'arcade':
-        this.audio.playArcade();
-        if (this.progress.findEgg('arcade')) {
-          this.reward(20);
-          say('NOUVEAU RECORD ! Tu bats le score de démonstration. +20 ¢');
-        } else {
-          say(
-            this.pickLine(it.id, [
-              'GAME OVER. MEILLEUR SCORE : K.A.L.L.I.O.P.E — 999 999.',
-              'Tu bats le record de… personne. La borne est en mode démo.',
-              'INSERT COIN. Ah non, c\'est gratuit aujourd\'hui.',
-              'Niveau 99 atteint. La borne te regarde avec respect.',
-            ]),
-          );
-        }
-        return;
-      case 'oracle':
-        say(this.pickLine(it.id, it.lines ?? ['…']));
-        return;
-      case 'fountain': {
-        if (!this.progress.spend(1)) {
-          this.audio.playDenied();
-          say('Il te faut au moins 1 ¢ pour faire un vœu.');
-          return;
-        }
-        this.progress.coins++;
-        this.progress.save();
-        this.audio.playSplash();
-        this.particles.burst(this.tmp.set(0, 0.6, -14), {
-          count: 30,
-          color: 0x7fd8ff,
-          color2: 0xffffff,
-          intensity: 2.5,
-          speedMin: 2,
-          speedMax: 5,
-          lifeMin: 0.3,
-          lifeMax: 0.6,
-          sizeMin: 0.04,
-          sizeMax: 0.08,
-          gravity: 9,
-          drag: 1,
-          direction: new THREE.Vector3(0, 1, 0),
-          spread: 0.8,
-        });
-        if (this.progress.coins >= 7 && this.progress.findEgg('fountain')) {
-          this.reward(77);
-          say('JACKPOT ! Sept vœux, sept vies : la fontaine te recrache 77 ¢.');
-        } else {
-          say(
-            this.pickLine(it.id, [
-              'Plouf. Ton vœu a été enregistré dans le cloud.',
-              'Plouf. Vœu en file d\'attente : position 4 096.',
-              'Plouf. La fontaine fait semblant de ne pas avoir entendu.',
-              'Plouf. Quelque part, un serveur exauce peut-être ton vœu.',
-            ]),
-          );
-        }
-        return;
-      }
-      case 'statue':
-        if (this.progress.findEgg('statue')) {
-          this.reward(80);
-          say('Tu as trouvé la muse KALLIOPE. Elle t\'offre 80 ¢ et un peu d\'inspiration.');
-        } else {
-          say('La muse veille sur la Plaza. Elle t\'a à l\'œil.');
-        }
-        return;
-      case 'mamie': {
-        const n = this.progress.countEggs('cat-');
-        if (n >= CAT_COUNT) {
-          if (this.progress.findEgg('cats-reward')) {
-            this.reward(100);
-            say('Mes bébés, tous rentrés ! Tiens, prends ça : 100 ¢. Tu es un amour.');
-          } else {
-            say('Ils ronronnent depuis que tu es passé. Reviens quand tu veux.');
-          }
-        } else if (n === 0) {
-          say('Mes cinq chats néon se sont encore sauvés dans la Plaza… Tu me les ramènes ? Ils aiment les endroits en hauteur.');
-        } else {
-          say(`Tu en as retrouvé ${n} sur ${CAT_COUNT}. Les autres se cachent : en hauteur, ou près de quelque chose qui sent bon.`);
-        }
-        return;
-      }
-      default:
-        say(this.pickLine(it.id, it.lines ?? ['…']));
-    }
+      return { id: u.id, name: u.name, desc: u.desc, price: u.price, owned };
+    });
   }
 
-  private shopItems(vendor: VendorId): ShopItem[] {
-    return UPGRADES.filter((u) => u.vendor === vendor).map((u) => ({ id: u.id, name: u.name, desc: u.desc, price: u.price, owned: this.progress.has(u.id) }));
-  }
-
-  private openShop(vendor: VendorId): void {
+  private openShop(vendor: VendorId | 'indic'): void {
     this.shopVendor = vendor;
     this.state = 'shop';
     this.audio.stopLoops();
@@ -840,22 +771,137 @@ export class Game {
     const v = VENDORS[vendor];
     const items = this.shopItems(vendor);
     this.shop.open(v, items, this.progress.credits);
-    if (items.every((i) => i.owned)) this.shop.refresh(items, this.progress.credits, v.soldOut);
+    if (items.length === 0 || items.every((i) => i.owned)) this.shop.refresh(items, this.progress.credits, v.soldOut);
     this.input.exitPointerLock();
   }
 
   private buyUpgrade(id: string): void {
-    const v = VENDORS[this.shopVendor];
+    const vendor = this.shopVendor;
+    const v = VENDORS[vendor];
+    const refresh = (msg: string) => this.shop.refresh(this.shopItems(vendor), this.progress.credits, msg);
+    // Tuyaux de l'Indic
+    if (id.startsWith('hint-')) {
+      if (this.progress.hasFlag(id)) return;
+      if (!this.progress.spend(HINT_PRICE)) {
+        this.audio.playDenied();
+        refresh('Les infos, ça se paie. Reviens avec des crédits.');
+        return;
+      }
+      this.progress.setFlag(id);
+      this.audio.playCoin();
+      refresh(this.pickThanks(v.thanks));
+      return;
+    }
+    // Encre déjà achetée : on l'équipe
+    if (this.progress.has(id) && this.progress.equipInk(id)) {
+      this.applyInk();
+      this.audio.playUiBlip();
+      refresh('Belle couleur. Elle te va bien.');
+      return;
+    }
     if (this.progress.buy(id)) {
       this.audio.playCoin();
       // Effet immédiat des améliorations
       this.player.health = STATS.maxHealth;
       this.player.dashCharges = STATS.dashMax;
-      this.shop.refresh(this.shopItems(this.shopVendor), this.progress.credits, this.pickLine(`shop-${this.shopVendor}`, v.thanks));
+      this.applyLoadout();
+      if (id === 'monowire') this.hud.flashMessage('MONOWIRE · TOUCHE 3', '#ff8a2b', 1800);
+      refresh(this.pickThanks(v.thanks));
     } else {
       this.audio.playDenied();
-      this.shop.refresh(this.shopItems(this.shopVendor), this.progress.credits, 'Pas assez de crédits, runner. Termine un niveau et reviens.');
+      refresh('Pas assez de crédits, runner. Termine un niveau et reviens.');
     }
+  }
+
+  /** Armes débloquées et encre des lames selon la progression. */
+  private applyLoadout(): void {
+    if (this.progress.has('monowire')) this.weapons.unlocked.add('monowire');
+    this.hud.setUnlocked(this.weapons.unlocked);
+    this.applyInk();
+  }
+
+  private applyInk(): void {
+    const [right, left] = this.progress.inkColors();
+    this.weapons.setInk(right, left);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Histoire, secrets, journal
+  // ---------------------------------------------------------------------------
+
+  /** Fragments du message de Sacha déjà reçus. */
+  private fragments(): number {
+    return STORY_LOGS.filter((l) => l.fragment && this.progress.hasFlag(logFlag(l.level))).length;
+  }
+
+  private checkSecretsNearby(): void {
+    for (const sec of this.secrets) {
+      if (sec.found || sec.def.radius <= 0) continue;
+      if (sec.center.distanceTo(this.player.position) < sec.def.radius) this.discoverSecret(sec);
+    }
+  }
+
+  /** Tir du pistolet : les secrets à abattre sont touchés avant le décor. */
+  private checkSecretShot(origin: THREE.Vector3, dir: THREE.Vector3, distance: number): void {
+    if (this.mode !== 'level') return;
+    for (const sec of this.secrets) {
+      if (sec.found || !sec.def.shootable) continue;
+      const d = raySphere(origin, dir, sec.center, 1.5);
+      if (d !== null && d < distance + 1.5) this.discoverSecret(sec);
+    }
+  }
+
+  private discoverSecret(sec: SecretRuntime): void {
+    sec.found = true;
+    sec.reveal();
+    if (!this.progress.setFlag(`secret-${sec.def.id}`)) return;
+    this.progress.addCredits(SECRET_REWARD);
+    const n = this.progress.countEggs('secret-');
+    this.audio.playSecret();
+    if (sec.def.kind === 'vinyl') this.audio.playVinyl();
+    if (sec.def.kind === 'payphone') this.audio.playLogStart();
+    vibrate(30);
+    this.hud.showSecret(`SECRET ${n}/${SECRET_TOTAL} · ${sec.def.name}`, `${sec.def.text} +${SECRET_REWARD} ¢`);
+  }
+
+  private journalData(): JournalData {
+    const w = siblingWords(this.progress.sibling);
+    const logs = STORY_LOGS.map((l) => {
+      const unlocked = this.progress.hasFlag(logFlag(l.level));
+      return {
+        title: `${l.code} · ${l.title}`,
+        subtitle: LEVELS[l.level]?.name ?? '',
+        text: unlocked ? l.text(this.progress.sibling, this.fragments()) : `— Signal non récupéré. Atteins la balise de ${LEVELS[l.level]?.name ?? '?'}. —`,
+        unlocked,
+      };
+    });
+    const secrets = LEVELS.flatMap((l) =>
+      (l.secrets ?? []).map((sec) => {
+        const found = this.progress.hasFlag(`secret-${sec.id}`);
+        const hinted = this.progress.hasFlag(`hint-${sec.id}`);
+        return {
+          title: found ? sec.name : '???',
+          subtitle: l.name,
+          text: found ? sec.text : hinted ? `Tuyau : ${sec.hint}` : 'Introuvé. L\'Indic, rue des Lanternes, vend des tuyaux.',
+          unlocked: found,
+        };
+      }),
+    );
+    return { siblingLabel: w.Ton.toUpperCase(), logs, secrets, quests: this.director.quests() };
+  }
+
+  private openJournal(): void {
+    this.audio.init();
+    this.audio.playUiBlip();
+    this.journal.open(this.journalData());
+  }
+
+  private toggleSibling(): void {
+    this.progress.sibling = this.progress.sibling === 'frere' ? 'soeur' : 'frere';
+    this.progress.save();
+    this.audio.playUiBlip();
+    if (this.journal.isOpen) this.journal.refresh(this.journalData());
+    if (this.state === 'menu') this.showMenu();
   }
 
   /** Lance un niveau (geste utilisateur requis pour le plein écran / pointer lock). */
@@ -873,11 +919,17 @@ export class Game {
     const def = LEVELS[this.currentLevel];
     this.mode = 'level';
     this.plaza = null;
+    this.director.detach();
     this.hud.setMode('level');
+    this.hud.setObjective(null);
     this.touch?.setInteract(null);
     this.enemies.clearAll();
     this.particles.clear();
-    this.levelData = this.level.loadLevel(def);
+    const secrets: SecretRuntime[] = [];
+    this.levelData = this.level.loadLevel(def, (b) => {
+      for (const sd of def.secrets ?? []) secrets.push(buildSecret(b, sd, this.progress.hasFlag(`secret-${sd.id}`)));
+    });
+    this.secrets = secrets;
     this.enemies.spawnAll(this.levelData.enemySpawns);
     this.engine.setTheme(def.theme);
     this.audio.setRainLevel(def.theme.rain);
@@ -909,7 +961,12 @@ export class Game {
       best: this.loadBestTime(i),
       accent: l.theme.skyGlow,
     }));
-    this.hud.showStart(cards, this.currentLevel, this.progress.credits);
+    this.hud.showStart(cards, this.currentLevel, this.progress.credits, {
+      sibling: siblingWords(this.progress.sibling).Ton.toUpperCase(),
+      fragments: this.fragments(),
+      secrets: this.progress.countEggs('secret-'),
+      secretTotal: SECRET_TOTAL,
+    });
   }
 
   private readFlag(key: string): boolean {

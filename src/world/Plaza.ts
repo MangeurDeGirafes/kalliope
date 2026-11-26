@@ -5,6 +5,7 @@ import type { LevelDef } from './levels';
 import { createPixelSign, drawPixelText, pixelTexture, SIGN_SCHEMES } from './PixelTextures';
 import { createRng } from './Textures';
 import { LIGHTING } from '../config';
+import type { VendorId } from '../progress/Progress';
 
 /**
  * La Plaza : parc suspendu entre deux niveaux. Exploration libre, marchands
@@ -12,7 +13,24 @@ import { LIGHTING } from '../config';
  * borne d'arcade, oracle, fontaine à vœux, statue secrète).
  */
 
-export type InteractKind = 'clinic' | 'atelier' | 'ramen' | 'arcade' | 'oracle' | 'fountain' | 'statue' | 'mamie' | 'npc';
+export type InteractKind =
+  | 'shop'
+  | 'indic'
+  | 'ramen'
+  | 'arcade'
+  | 'oracle'
+  | 'fountain'
+  | 'statue'
+  | 'mamie'
+  | 'npc'
+  | 'dj'
+  | 'bar'
+  | 'jukebox'
+  | 'vending'
+  | 'door'
+  | 'elevator'
+  | 'courier'
+  | 'race';
 
 export interface Interactable {
   id: string;
@@ -26,6 +44,19 @@ export interface Interactable {
   color: string;
   /** Répliques tirées au hasard (personnages simples). */
   lines?: readonly string[];
+  /** Boutique ouverte par ce marchand. */
+  vendor?: VendorId;
+  /** Ascenseur : point d'arrivée et orientation. */
+  target?: THREE.Vector3;
+  targetYaw?: number;
+}
+
+/** Objet de quête ramassé en passant (colis de Vex). */
+interface Pickup {
+  id: string;
+  mesh: THREE.Object3D;
+  base: THREE.Vector3;
+  collected: boolean;
 }
 
 interface Npc {
@@ -45,6 +76,10 @@ interface Cat {
 }
 
 export const CAT_COUNT = 5;
+export const PACKAGE_COUNT = 3;
+/** Arrivée de la course de Petit Zéro (toit jaune du marché). */
+export const RACE_FINISH = new THREE.Vector3(23.5, 12, -133);
+export const RACE_START = new THREE.Vector3(6, 0, -72);
 
 type Rng = () => number;
 
@@ -62,7 +97,16 @@ export function plazaDef(exitLabel: string): LevelDef {
     difficulty: 1,
     spawn: [0, 0, 20],
     spawnYaw: 0,
-    buildings: [{ x: 0, z: -22, w: 56, d: 96, top: 0, trim: 'pink', facade: 1, roof: 'concrete' }],
+    buildings: [
+      { x: 0, z: -62, w: 56, d: 176, top: 0, trim: 'pink', facade: 1, roof: 'concrete' },
+      // Rue des Lanternes : immeubles du marché (toits accessibles)
+      { x: -20.5, z: -84, w: 13, d: 18, top: 8, trim: 'pink', facade: 0, roof: 'tar', side: true },
+      { x: -20.5, z: -106, w: 13, d: 18, top: 10, trim: 'cyan', facade: 3, roof: 'concrete', side: true },
+      { x: -20.5, z: -128, w: 13, d: 18, top: 8, trim: 'amber', facade: 5, roof: 'rust', side: true },
+      { x: 20.5, z: -84, w: 13, d: 18, top: 8, trim: 'orange', facade: 2, roof: 'tar', side: true },
+      { x: 20.5, z: -106, w: 13, d: 18, top: 10, trim: 'purple', facade: 4, roof: 'green', side: true },
+      { x: 20.5, z: -128, w: 13, d: 18, top: 12, trim: 'yellow', facade: 6, roof: 'concrete', side: true },
+    ],
     walls: [],
     barriers: [],
     pads: [{ pos: [17, 0, -44], power: 22.5, boost: [0, 0, -6] }],
@@ -70,7 +114,8 @@ export function plazaDef(exitLabel: string): LevelDef {
     drones: [],
     holos: [
       { lines: ['BIENVENUE À LA PLAZA', 'MARCHANDS · SECRETS · REPOS'], pos: [0, 3.1, 11], color: 'pink', width: 5.5 },
-      { lines: ['SORTIE ▶', exitLabel], pos: [0, 7.6, -60], color: 'yellow', width: 6.5 },
+      { lines: ['SORTIE ▶', exitLabel], pos: [0, 7.6, -141], color: 'yellow', width: 6.5 },
+      { lines: ['RUE DES LANTERNES', 'BOUTIQUES · BAR · TOITS'], pos: [0, 5.8, -72], color: 'orange', width: 5 },
       { lines: ['▲ TREMPLIN ▲'], pos: [17, 3.2, -40.5], color: 'green', width: 3.2 },
     ],
     lights: [
@@ -79,10 +124,12 @@ export function plazaDef(exitLabel: string): LevelDef {
       { pos: [17, 4.5, -2], color: 'orange', intensity: 16, distance: 18 },
       { pos: [-17, 4.5, -30], color: 'red', intensity: 16, distance: 18 },
       { pos: [17, 4.5, -30], color: 'purple', intensity: 16, distance: 18 },
-      { pos: [0, 6, -58], color: 'yellow', intensity: 20, distance: 24 },
+      { pos: [0, 6, -140], color: 'yellow', intensity: 20, distance: 24 },
+      { pos: [-10, 5, -88], color: 'pink', intensity: 14, distance: 18 },
+      { pos: [10, 5, -106], color: 'purple', intensity: 14, distance: 18 },
     ],
     signs: [],
-    finish: [0, 0, -63],
+    finish: [0, 0, -144],
     theme: {
       fog: 0x22142a,
       fogDensity: 0.0058,
@@ -139,13 +186,17 @@ const tmpV = new THREE.Vector3();
 export class Plaza {
   readonly interactables: Interactable[] = [];
   readonly cats: Cat[] = [];
+  /** Colis de Vex (visibles seulement pendant la quête). */
+  readonly packages: Pickup[] = [];
   private readonly npcs: Npc[] = [];
+  private raceMarker: THREE.Group | null = null;
   private water: THREE.MeshBasicMaterial | null = null;
   private arcade: { ctx: CanvasRenderingContext2D; texture: THREE.CanvasTexture; timer: number; frame: number } | null = null;
   private time = 0;
 
   /** Construit la Plaza (appelé par LevelBuilder.loadLevel). */
   build(b: LevelBuilder, catFound: (id: string) => boolean): void {
+    this.packages.length = 0;
     this.interactables.length = 0;
     this.cats.length = 0;
     this.npcs.length = 0;
@@ -183,8 +234,8 @@ export class Plaza {
     this.npc(b, 21.6, -2, -Math.PI / 2, { skin: SKIN[4], hair: 0xd8d8e0, top: 0x6a4a2a, pants: 0x3a2a1a, accent: 0xff8a2b, extra: 'goggles', apron: 0x5a3a1f, scale: 0.92 });
     this.npc(b, -21.6, -30, Math.PI / 2, { skin: SKIN[1], hair: 0x2a1a10, top: 0xf2f2f2, pants: 0x2a2a30, accent: 0xff3b3b, extra: 'bandana', apron: 0xf0e6d0 });
 
-    this.interact('clinic', 'clinic', 'DOC SATO', 'PARLER À', -18.6, 0, -2, 2.4, '#2bd9c5');
-    this.interact('atelier', 'atelier', 'MÉMÉ RIVET', 'PARLER À', 18.6, 0, -2, 2.4, '#ff8a2b');
+    this.interact('clinic', 'shop', 'DOC SATO', 'PARLER À', -18.6, 0, -2, 2.4, '#2bd9c5', undefined, { vendor: 'clinic' });
+    this.interact('atelier', 'shop', 'MÉMÉ RIVET', 'PARLER À', 18.6, 0, -2, 2.4, '#ff8a2b', undefined, { vendor: 'atelier' });
     this.interact('ramen', 'ramen', 'OKONOMI', 'COMMANDER UN RAMEN CHEZ', -18.6, 0, -30, 2.4, '#ff3b3b');
     this.interact('arcade', 'arcade', 'NEON RUSH', 'JOUER À', 18.6, 0, -30, 2.4, '#a36bff');
 
@@ -193,9 +244,10 @@ export class Plaza {
     b.addCollider(new THREE.Vector3(9.6, 0.9, 9.6), new THREE.Vector3(0.35, 0.9, 0.35));
     this.interact('mamie', 'mamie', 'MAMIE CHAT', 'PARLER À', 9.6, 0, 9.6, 2.4, '#ff7ad9');
 
-    this.npc(b, 17.6, -24.6, -2.2, { skin: SKIN[2], hair: 0x1a1a1a, top: 0xffd23b, pants: 0x1a3a6a, accent: 0x7fd8ff, extra: 'cap', scale: 0.72 });
-    b.addCollider(new THREE.Vector3(17.6, 0.7, -24.6), new THREE.Vector3(0.3, 0.7, 0.3));
-    this.interact('kid', 'npc', 'PETIT ZÉRO', 'PARLER À', 17.6, 0, -24.6, 2.2, '#ffd23b', [
+    // Petit Zéro organise la course des toits, à l'entrée de la rue des Lanternes
+    this.npc(b, RACE_START.x, RACE_START.z, 0, { skin: SKIN[2], hair: 0x1a1a1a, top: 0xffd23b, pants: 0x1a3a6a, accent: 0x7fd8ff, extra: 'cap', scale: 0.72 });
+    b.addCollider(new THREE.Vector3(RACE_START.x, 0.7, RACE_START.z), new THREE.Vector3(0.3, 0.7, 0.3));
+    this.interact('kid', 'race', 'PETIT ZÉRO', 'PARLER À', RACE_START.x, 0, RACE_START.z, 2.2, '#ffd23b', [
       'Paraît que si tu fais sept vœux à la fontaine, il se passe un truc.',
       'Moi aussi, un jour, j\'aurai des lames Mantis. Et un vrai sandwich.',
       'Le tremplin là-bas ? Tout en haut, y a une statue en or. Juré.',
@@ -206,6 +258,7 @@ export class Plaza {
     this.oracle(b);
     this.crates(b);
     this.tower(b);
+    this.market(b, rng);
 
     // Chats néon cachés
     const spots: [number, number, number, number][] = [
@@ -252,6 +305,12 @@ export class Plaza {
       const flip = Math.sin(t * 0.7 + c.phase * 3) > 0.92 ? -1 : 1;
       c.sprite.scale.x = Math.abs(c.sprite.scale.x) * flip;
     }
+    for (const p of this.packages) {
+      if (!p.mesh.visible) continue;
+      p.mesh.position.y = p.base.y + 0.25 + Math.sin(t * 2.2 + p.base.x) * 0.08;
+      p.mesh.rotation.y = t * 0.8;
+    }
+    if (this.raceMarker?.visible) this.raceMarker.children[1].rotation.y = Math.sin(t * 5) * 0.3;
     if (this.water) this.water.opacity = 0.62 + Math.sin(t * 2.3) * 0.08;
     if (this.arcade) {
       this.arcade.timer -= dt;
@@ -299,7 +358,7 @@ export class Plaza {
 
   private ground(b: LevelBuilder, rng: Rng): void {
     // Allée centrale en pavés
-    for (let z = 25; z > -69; z -= 1) {
+    for (let z = 25; z > -149; z -= 1) {
       for (let x = -2; x <= 2; x++) {
         b.prop(0.98, 0.03, 0.98, x, 0.015, z - 0.5, (x + Math.floor(z)) % 2 === 0 ? 0x8a7a6a : 0x76685a);
       }
@@ -329,9 +388,9 @@ export class Plaza {
     const h = 1.05;
     const edges: [number, number, number, number][] = [
       [-27.85, 25.85, 27.85, 25.85],
-      [-27.85, -69.85, 27.85, -69.85],
-      [-27.85, -69.85, -27.85, 25.85],
-      [27.85, -69.85, 27.85, 25.85],
+      [-27.85, -149.85, 27.85, -149.85],
+      [-27.85, -149.85, -27.85, 25.85],
+      [27.85, -149.85, 27.85, 25.85],
     ];
     for (const [x0, z0, x1, z1] of edges) {
       const len = Math.hypot(x1 - x0, z1 - z0);
@@ -350,7 +409,7 @@ export class Plaza {
   }
 
   private lamps(b: LevelBuilder, rng: Rng): void {
-    const zs = [16, 4, -26, -38, -50];
+    const zs = [16, 4, -26, -38, -50, -80, -96, -124, -140];
     for (const z of zs) {
       for (const x of [-3.4, 3.4]) {
         b.prop(0.12, 3.6, 0.12, x, 1.8, z, 0x2a2a30);
@@ -613,7 +672,7 @@ export class Plaza {
     const npc = this.npc(b, x, z, 0, { skin: SKIN[3], hair: 0x2bd9c5, top: 0x1a1a22, pants: 0x3a1a4a, accent: 0xff2bd6, extra: 'headphones' });
     npc.dance = true;
     b.addCollider(new THREE.Vector3(x, 0.9, z), new THREE.Vector3(0.35, 0.9, 0.35));
-    this.interact('dj', 'npc', 'DJ BAO', 'PARLER À', x, 0, z, 2.6, '#ff2bd6', [
+    this.interact('dj', 'dj', 'DJ BAO', 'PARLER À', x, 0, z, 2.6, '#ff2bd6', [
       'Ce beat ? 128 BPM, comme ton cœur sur un mur.',
       'Je mixe la pluie et les sirènes. Ça cartonne.',
       'Danse un peu, runner. Les toits peuvent attendre.',
@@ -748,8 +807,264 @@ export class Plaza {
     this.cats.push({ id, sprite, base: new THREE.Vector3(x, y, z), collected: false, phase: index * 1.3 });
   }
 
-  private interact(id: string, kind: InteractKind, name: string, verb: string, x: number, y: number, z: number, radius: number, color: string, lines?: readonly string[]): void {
-    this.interactables.push({ id, kind, name, verb, position: new THREE.Vector3(x, y, z), radius, color, lines });
+  private interact(
+    id: string,
+    kind: InteractKind,
+    name: string,
+    verb: string,
+    x: number,
+    y: number,
+    z: number,
+    radius: number,
+    color: string,
+    lines?: readonly string[],
+    extra?: Partial<Interactable>,
+  ): void {
+    this.interactables.push({ id, kind, name, verb, position: new THREE.Vector3(x, y, z), radius, color, lines, ...extra });
+  }
+
+  /** Colis encore à ramasser, montrés ou cachés selon l'état de la quête. */
+  setPackagesVisible(visible: boolean, taken: (id: string) => boolean): void {
+    for (const p of this.packages) {
+      p.collected = taken(p.id);
+      p.mesh.visible = visible && !p.collected;
+    }
+  }
+
+  /** Colis ramassé à cette frame. */
+  collectPackage(center: THREE.Vector3): Pickup | null {
+    for (const p of this.packages) {
+      if (p.collected || !p.mesh.visible) continue;
+      if (tmpV.copy(p.base).setY(p.base.y + 0.9).distanceTo(center) < 1.6) {
+        p.collected = true;
+        p.mesh.visible = false;
+        return p;
+      }
+    }
+    return null;
+  }
+
+  /** Repère de l'arrivée de la course (visible pendant la course). */
+  setRaceMarker(visible: boolean): void {
+    if (this.raceMarker) this.raceMarker.visible = visible;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rue des Lanternes : façades, boutiques, escalier, passerelle, ascenseurs
+  // ---------------------------------------------------------------------------
+
+  private market(b: LevelBuilder, rng: Rng): void {
+    const L = -14;
+    const R = 14;
+    // Boutiques en rez-de-chaussée
+    this.front(b, L, -82, 1, 'NEON INK', 4, 0xff7ad9, 0x2a1a2a);
+    this.npc(b, L + 0.45, -82, Math.PI / 2, { skin: SKIN[0], hair: 0xff2bd6, top: 0x1a1a22, pants: 0x2a2a3a, accent: 0xff7ad9, extra: 'bun' });
+    this.interact('ink', 'shop', 'PIXEL', 'PARLER À', L + 2.7, 0, -82, 2.4, '#ff7ad9', undefined, { vendor: 'ink' });
+
+    this.front(b, R, -84, -1, 'ARMES', 0, 0xff3b3b, 0x2a2a30);
+    this.npc(b, R - 0.45, -84, -Math.PI / 2, { skin: SKIN[2], hair: 0x8a8a8a, top: 0x4a5a3a, pants: 0x2a2a20, accent: 0xff3b3b, extra: 'goggles', scale: 1.08 });
+    this.interact('armory', 'shop', 'KOVA', 'PARLER À', R - 2.7, 0, -84, 2.4, '#ff3b3b', undefined, { vendor: 'armory' });
+
+    this.front(b, L, -101, 1, 'INFOS', 6, 0x2bffb0, 0x101820);
+    this.npc(b, L + 0.45, -101, Math.PI / 2, { skin: SKIN[3], hair: 0x101014, top: 0x2a2e36, pants: 0x1a1a20, accent: 0x2bffb0, extra: 'visor' });
+    this.interact('indic', 'indic', 'L\'INDIC', 'PARLER À', L + 2.7, 0, -101, 2.4, '#2bffb0');
+
+    this.front(b, R, -102, -1, 'BAR', 2, 0xffb030, 0x4a2e1a);
+    this.npc(b, R - 0.45, -102, -Math.PI / 2, { skin: SKIN[1], hair: 0x2bd9c5, top: 0x5a2a7a, pants: 0x1a1a2a, accent: 0x00e5ff });
+    this.interact('bar', 'bar', 'IRIS', 'PARLER À', R - 2.7, 0, -102, 2.4, '#ffb030');
+    for (const dz of [-1.2, 0, 1.2]) {
+      b.prop(0.1, 0.7, 0.1, R - 3.1, 0.35, -102 + dz, 0x2a2a30);
+      b.propGeo(new THREE.CylinderGeometry(0.22, 0.22, 0.08, 10), b.matrix(R - 3.1, 0.74, -102 + dz), 0xd83a3a);
+    }
+    // Juke-box du bar
+    b.prop(0.8, 1.6, 1.0, R - 0.5, 0.8, -109.5, 0x3a1a4a);
+    b.propGeo(new THREE.CylinderGeometry(0.5, 0.5, 1.0, 12, 1, false, 0, Math.PI), b.matrix(R - 0.5, 1.6, -109.5, 0, 0, Math.PI / 2), 0x5a2a7a);
+    b.glow(0.04, 0.9, 0.7, R - 0.92, 0.9, -109.5, 0xff7ad9, 2.4);
+    b.glow(0.04, 0.12, 0.8, R - 0.92, 1.55, -109.5, 0xffd23b, 2.6);
+    b.addCollider(new THREE.Vector3(R - 0.5, 0.9, -109.5), new THREE.Vector3(0.4, 0.9, 0.5));
+    this.interact('jukebox', 'jukebox', 'JUKE-BOX', 'METTRE UN MORCEAU SUR LE', R - 2.2, 0, -109.5, 1.8, '#ff7ad9');
+
+    // Distributeurs, portes
+    this.vending(b, L, -90, 1, 0x2bd9c5);
+    this.vending(b, R, -91.5, -1, 0xffd23b);
+    this.door(b, L, -76.5, 1, 'door-2b', 'PORTE 2B', 0xff7ad9);
+    this.door(b, R, -113.5, -1, 'door-7', 'PORTE 7', 0xa36bff);
+    this.door(b, R, -132, -1, 'door-13', 'PORTE 13', 0xffd23b);
+    this.door(b, L, -135.5, 1, 'door-9', 'PORTE 9', 0xffb030);
+
+    // Ascenseurs : rue ↔ toits
+    this.elevator(b, L, -111, 1, new THREE.Vector3(-19.5, 10, -108), -Math.PI / 2);
+    this.roofHut(b, -24.5, 10, -110, 1, new THREE.Vector3(L + 1.6, 0, -111), -Math.PI / 2);
+    this.elevator(b, R, -122, -1, new THREE.Vector3(19.5, 12, -124), Math.PI / 2);
+    this.roofHut(b, 24.5, 12, -122, -1, new THREE.Vector3(R - 1.6, 0, -122), Math.PI / 2);
+
+    // Escalier de secours (façade gauche du fond) : marches visibles, rampe invisible dessous
+    for (let i = 0; i < 18; i++) {
+      const top = (i + 1) * 0.44;
+      const z = -120.6 - i * 0.55;
+      b.prop(1.6, 0.08, 0.56, L + 0.8, top - 0.04, z, 0x3a3a44);
+      b.prop(1.6, 0.04, 0.04, L + 0.8, top - 0.2, z + 0.26, 0x2a2a30);
+    }
+    {
+      // Pente de 0 m (z = -120,3) à 8 m (z = -130) : ~40°, sous la limite de pente du joueur.
+      // La rampe dépasse un peu dans le palier pour une jonction sans marche.
+      const z0 = -120.3;
+      const z1 = -130.0;
+      const rise = 8;
+      const run = z0 - z1;
+      const angle = Math.atan2(rise, run);
+      const len = Math.hypot(rise, run) + 0.5;
+      const thick = 0.2;
+      const cy = rise / 2 - (thick / 2) / Math.cos(angle);
+      const shift = 0.25 * Math.cos(angle);
+      b.addCollider(new THREE.Vector3(L + 0.8, cy + 0.25 * Math.sin(angle), (z0 + z1) / 2 - shift), new THREE.Vector3(0.8, thick / 2, len / 2), 0, angle);
+      // Garde-corps côté rue
+      b.addCollider(new THREE.Vector3(L + 1.65, 4.5, (z0 + z1) / 2), new THREE.Vector3(0.05, 4.5, run / 2));
+    }
+    b.prop(1.8, 0.1, 3, L + 0.8, 7.95, -131.5, 0x3a3a44);
+    b.addCollider(new THREE.Vector3(L + 0.8, 4, -131.5), new THREE.Vector3(0.8, 4, 1.5));
+    b.prop(0.06, 9, 0.06, L + 1.6, 4.5, -120.4, 0x2a2a30);
+    b.prop(0.06, 9, 0.06, L + 1.6, 4.5, -133, 0x2a2a30);
+    for (let y = 1; y < 9; y += 1.2) b.glow(0.03, 0.03, 12.6, L + 1.62, y + 0.6, -126.7, 0xff8a2b, 1.2);
+
+    // Passerelle au-dessus de la rue, entre les deux toits à 10 m
+    b.prop(28, 0.3, 2.6, 0, 9.85, -106, 0x2a2a34);
+    for (const s of [-1, 1]) {
+      b.prop(28, 0.06, 0.06, 0, 10.95, -106 + s * 1.25, 0x3a3a46);
+      b.glow(28, 0.04, 0.04, 0, 10.4, -106 + s * 1.25, 0x00e5ff, 1.8);
+      for (let x = -13; x <= 13; x += 2.6) b.prop(0.06, 1.0, 0.06, x, 10.5, -106 + s * 1.25, 0x3a3a46);
+      b.addCollider(new THREE.Vector3(0, 10.5, -106 + s * 1.3), new THREE.Vector3(14, 0.5, 0.05));
+    }
+    b.addCollider(new THREE.Vector3(0, 9.85, -106), new THREE.Vector3(14, 0.15, 1.3));
+
+    // Guirlandes et enseignes au-dessus de la rue
+    for (const z of [-80, -92, -120, -136]) b.stringLights(L, z, R, z, 6.2, rng);
+    const signs: [string, number, number, number, number][] = [
+      ['HOTEL', 3, L + 0.05, 6, -88],
+      ['KARAOKE', 4, R - 0.05, 5.5, -96],
+      ['RAMEN', 2, L + 0.05, 5, -126],
+      ['24H', 7, R - 0.05, 7, -126],
+      ['CLUB', 0, R - 0.05, 6.5, -110],
+    ];
+    for (const [text, scheme, x, y, z] of signs) {
+      const vertical = text.length <= 4;
+      const { texture, aspect } = createPixelSign(text, SIGN_SCHEMES[scheme], vertical);
+      const mat = b.signMaterial(texture, 1.6);
+      mat.transparent = true;
+      b.courseDisposables.push(mat, texture);
+      const hh = vertical ? 3.2 : 1;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(hh * aspect, hh), mat);
+      plane.position.set(x, y, z);
+      plane.rotation.y = x < 0 ? Math.PI / 2 : -Math.PI / 2;
+      b.course.add(plane);
+    }
+
+    // Courrier Vex et ses colis perdus sur les toits
+    this.npc(b, -7, -74, 0, { skin: SKIN[1], hair: 0xffd23b, top: 0xff8a2b, pants: 0x2a2a3a, accent: 0xffd23b, extra: 'cap' });
+    b.addCollider(new THREE.Vector3(-7, 0.9, -74), new THREE.Vector3(0.35, 0.9, 0.35));
+    this.interact('courier', 'courier', 'VEX', 'PARLER À', -7, 0, -74, 2.4, '#ffd23b');
+    const spots: [number, number, number][] = [
+      [-21, 8, -80],
+      [0, 10, -106],
+      [18.5, 12, -134],
+    ];
+    spots.forEach(([x, y, z], i) => {
+      const g = new THREE.Group();
+      const boxMat = new THREE.MeshStandardMaterial({ color: 0xb8864a, roughness: 0.8, emissive: 0x3a2410, emissiveIntensity: 0.8 });
+      const strap = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd23b).multiplyScalar(2.5 * LIGHTING.neon), toneMapped: false });
+      b.courseDisposables.push(boxMat, strap);
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.42, 0.5), boxMat));
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.44, 0.08), strap);
+      g.add(band);
+      const marker = new THREE.Mesh(new THREE.OctahedronGeometry(0.18), strap);
+      marker.position.y = 0.9;
+      g.add(marker);
+      g.position.set(x, y + 0.25, z);
+      g.visible = false;
+      b.course.add(g);
+      this.packages.push({ id: `pkg-${i + 1}`, mesh: g, base: new THREE.Vector3(x, y, z), collected: false });
+    });
+
+    // Arrivée de la course : drapeau et colonne de lumière
+    const flag = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.BoxGeometry(0.08, 3, 0.08), b.propMaterial);
+    pole.position.y = 1.5;
+    const clothMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd23b).multiplyScalar(2.4 * LIGHTING.neon), toneMapped: false, side: THREE.DoubleSide });
+    const columnMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd23b).multiplyScalar(0.8), transparent: true, opacity: 0.25, depthWrite: false, toneMapped: false });
+    b.courseDisposables.push(clothMat, columnMat);
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7), clothMat);
+    cloth.position.set(0.58, 2.6, 0);
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 14, 16, 1, true), columnMat);
+    column.position.y = 7;
+    flag.add(pole, cloth, column);
+    flag.position.copy(RACE_FINISH);
+    flag.visible = false;
+    b.course.add(flag);
+    this.raceMarker = flag;
+  }
+
+  /** Devanture de boutique adossée à une façade (f = direction de la rue). */
+  private front(b: LevelBuilder, facadeX: number, z: number, f: 1 | -1, sign: string, scheme: number, accent: number, counter: number): void {
+    const ux = (u: number) => facadeX + f * u;
+    b.prop(0.6, 1.1, 3.4, ux(1.3), 0.55, z, counter);
+    b.prop(0.7, 0.08, 3.5, ux(1.3), 1.14, z, 0x1a1a22);
+    b.glow(0.04, 0.05, 3.4, ux(1.62), 1.0, z, accent, 2);
+    for (let i = 0; i < 7; i++) {
+      const col = i % 2 === 0 ? accent : 0xf2ece0;
+      b.propGeo(new THREE.BoxGeometry(1.4, 0.06, 0.56), b.matrix(ux(1.2), 2.95, z - 1.68 + i * 0.56, 0, 0, -f * 0.32), col);
+    }
+    for (const s of [-1, 1]) {
+      b.prop(0.1, 3, 0.1, ux(1.85), 1.5, z + s * 1.9, 0x2a2a30);
+      b.glow(0.2, 0.3, 0.2, ux(1.95), 2.5, z + s * 2.05, accent, 2.4);
+    }
+    // Vitrine éclairée derrière le marchand
+    b.glow(0.04, 1.4, 3.0, ux(0.03), 1.9, z, accent, 0.5);
+    const { texture, aspect } = createPixelSign(sign, SIGN_SCHEMES[scheme], false);
+    const mat = b.signMaterial(texture, 1.7);
+    mat.transparent = true;
+    b.courseDisposables.push(mat, texture);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.9 * aspect, 0.9), mat);
+    plane.position.set(ux(0.06), 3.75, z);
+    plane.rotation.y = (f * Math.PI) / 2;
+    b.course.add(plane);
+    b.addCollider(new THREE.Vector3(ux(0.8), 0.6, z), new THREE.Vector3(0.8, 0.6, 1.75));
+  }
+
+  private vending(b: LevelBuilder, facadeX: number, z: number, f: 1 | -1, color: number): void {
+    const x = facadeX + f * 0.5;
+    b.prop(1.0, 1.95, 1.1, x, 0.975, z, 0x2a3a4a);
+    b.glow(0.04, 1.1, 0.8, x + f * 0.52, 1.2, z, color, 1.4);
+    for (let i = 0; i < 6; i++) b.glow(0.05, 0.12, 0.08, x + f * 0.53, 0.85 + (i % 3) * 0.32, z - 0.25 + Math.floor(i / 3) * 0.5, [0xff3b3b, 0x2bffb0, 0xffd23b][i % 3], 2);
+    b.addCollider(new THREE.Vector3(x, 0.975, z), new THREE.Vector3(0.5, 0.975, 0.55));
+    this.interact(`vending-${z}`, 'vending', 'DISTRIBUTEUR', 'ACHETER UNE CANETTE (2 ¢) AU', facadeX + f * 1.9, 0, z, 1.8, `#${new THREE.Color(color).getHexString()}`);
+  }
+
+  private door(b: LevelBuilder, facadeX: number, z: number, f: 1 | -1, id: string, name: string, color: number): void {
+    const x = facadeX + f * 0.06;
+    b.prop(0.1, 2.3, 1.3, x, 1.15, z, 0x3a2a24);
+    b.glow(0.04, 0.05, 1.5, x + f * 0.06, 2.4, z, color, 2);
+    b.glow(0.04, 2.3, 0.05, x + f * 0.06, 1.15, z - 0.72, color, 1.4);
+    b.glow(0.04, 2.3, 0.05, x + f * 0.06, 1.15, z + 0.72, color, 1.4);
+    b.prop(0.08, 0.08, 0.08, x + f * 0.08, 1.1, z + 0.45, 0xd8c08a);
+    this.interact(id, 'door', name, 'FRAPPER À LA', facadeX + f * 1.3, 0, z, 1.6, `#${new THREE.Color(color).getHexString()}`);
+  }
+
+  private elevator(b: LevelBuilder, facadeX: number, z: number, f: 1 | -1, target: THREE.Vector3, yaw: number): void {
+    const x = facadeX + f * 0.06;
+    b.prop(0.1, 2.5, 1.8, x, 1.25, z, 0x8a8a96);
+    b.prop(0.12, 2.5, 0.05, x + f * 0.02, 1.25, z, 0x3a3a46);
+    b.glow(0.04, 0.3, 0.6, x + f * 0.06, 2.75, z, 0x00e5ff, 2.4);
+    this.interact(`elev-${z}`, 'elevator', 'L\'ASCENSEUR', 'PRENDRE', facadeX + f * 1.4, 0, z, 1.8, '#00e5ff', undefined, { target, targetYaw: yaw });
+  }
+
+  /** Cabanon de toit : sortie de l'ascenseur, pour redescendre. */
+  private roofHut(b: LevelBuilder, x: number, top: number, z: number, f: 1 | -1, target: THREE.Vector3, yaw: number): void {
+    b.prop(2.2, 2.6, 2.4, x, top + 1.3, z, 0x4a4a56);
+    b.prop(2.4, 0.15, 2.6, x, top + 2.65, z, 0x2a2a30);
+    b.prop(0.08, 2.1, 1.1, x + f * 1.12, top + 1.05, z, 0x8a8a96);
+    b.glow(0.04, 0.25, 0.5, x + f * 1.16, top + 2.3, z, 0x00e5ff, 2.4);
+    b.addCollider(new THREE.Vector3(x, top + 1.3, z), new THREE.Vector3(1.1, 1.3, 1.2));
+    this.interact(`hut-${z}`, 'elevator', 'L\'ASCENSEUR', 'REDESCENDRE PAR', x + f * 2.3, top, z, 1.8, '#00e5ff', undefined, { target, targetYaw: yaw });
   }
 }
 

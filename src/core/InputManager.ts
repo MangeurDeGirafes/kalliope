@@ -18,6 +18,8 @@ export type Action =
   | 'dash'
   | 'weapon1'
   | 'weapon2'
+  | 'weapon3'
+  | 'cycleWeapon'
   | 'restart'
   | 'interact';
 
@@ -31,6 +33,9 @@ const BINDINGS: Record<Action, readonly string[]> = {
   dash: ['ShiftLeft', 'ShiftRight'],
   weapon1: ['Digit1', 'Numpad1'],
   weapon2: ['Digit2', 'Numpad2'],
+  weapon3: ['Digit3', 'Numpad3'],
+  /** Arme suivante (bouton tactile ⇄ ; la molette fait de même au clavier/souris). */
+  cycleWeapon: [],
   restart: ['KeyR'],
   interact: ['KeyE', 'KeyF'],
 };

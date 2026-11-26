@@ -15,7 +15,7 @@ import {
   sceneSurvival,
   sceneWallrun,
 } from './TutorialScenes';
-import { LORE_PAGES } from './IntroContent';
+import type { LorePage } from './IntroContent';
 
 interface Page {
   kind: 'lore' | 'game';
@@ -68,13 +68,13 @@ function gamePages(touch: boolean): Page[] {
     ),
     page(
       'COMBAT',
-      'Les lames Mantis tuent en un seul coup. Un laser rouge annonce un tir imminent : tranche le projectile pour le renvoyer à son tireur. Le pistolet se charge des drones.',
-      keys(['CLIC GAUCHE', '1 / 2 : ARME'], ['ATTAQUE', '⇄ : ARME']),
+      'Les lames Mantis tuent en un seul coup. Un laser rouge annonce un tir imminent : tranche le projectile pour le renvoyer à son tireur. Le pistolet se charge des drones : maintiens puis relâche pour une décharge de chevrotine à trois projectiles. Le monowire (armurerie de la Plaza) frappe deux fois plus loin, en deux touches.',
+      keys(['CLIC GAUCHE', '1 / 2 / 3 : ARME'], ['ATTAQUE', '⇄ : ARME']),
       sceneCombat,
     ),
     page(
       'ATTAQUE CHARGÉE',
-      `Maintiens l'attaque un court instant (0,3 s), puis relâche : tu fonces sur l'ennemi le plus proche et tu le tranches. Ce dash ne consomme aucune charge et te rend invulnérable.`,
+      `Maintiens l'attaque un court instant (0,3 s), puis relâche : tu fonces sur l'ennemi le plus proche et tu le tranches. Ce dash ne consomme aucune charge et te rend invulnérable. Il faut ensuite quelques secondes de recharge (petit anneau autour du réticule).`,
       keys(['MAINTENIR CLIC GAUCHE'], ['MAINTENIR ATTAQUE']),
       sceneCharged,
     ),
@@ -121,17 +121,18 @@ export class Tutorial {
   private readonly dotsEl: HTMLDivElement;
   private readonly prevBtn: HTMLButtonElement;
   private readonly nextBtn: HTMLButtonElement;
-  private readonly pages: Page[];
+  private pages: Page[] = [];
+  private loreCount = 0;
+  private readonly touch: boolean;
+  private readonly lore: () => LorePage[];
   private index = 0;
   private opened = false;
   private pageStart = 0;
   private swipeX: number | null = null;
 
-  constructor(container: HTMLElement, touch: boolean) {
-    this.pages = [
-      ...LORE_PAGES.map((p): Page => ({ kind: 'lore', title: p.title, text: p.text, keys: [], scene: sceneLore })),
-      ...gamePages(touch),
-    ];
+  constructor(container: HTMLElement, touch: boolean, lore: () => LorePage[]) {
+    this.touch = touch;
+    this.lore = lore;
 
     this.root = document.createElement('div');
     this.root.className = 'tutorial';
@@ -172,15 +173,6 @@ export class Tutorial {
     this.prevBtn = q<HTMLButtonElement>('.tut-prev');
     this.nextBtn = q<HTMLButtonElement>('.tut-next');
 
-    for (let i = 0; i < this.pages.length; i++) {
-      const dot = document.createElement('button');
-      dot.type = 'button';
-      dot.className = 'tut-dot';
-      dot.setAttribute('aria-label', `Page ${i + 1}`);
-      dot.addEventListener('click', () => this.goTo(i));
-      this.dotsEl.appendChild(dot);
-    }
-
     this.prevBtn.addEventListener('click', () => this.goTo(this.index - 1));
     this.nextBtn.addEventListener('click', () => this.goTo(this.index + 1));
     q<HTMLButtonElement>('.tut-skip').addEventListener('click', () => this.close(false));
@@ -202,7 +194,27 @@ export class Tutorial {
     return this.opened;
   }
 
+  /** Pages recalculées à chaque ouverture (le lore dépend du lien choisi avec Sacha). */
+  private buildPages(): void {
+    const lore = this.lore();
+    this.loreCount = lore.length;
+    this.pages = [
+      ...lore.map((p): Page => ({ kind: 'lore', title: p.title, text: p.text, keys: [], scene: sceneLore })),
+      ...gamePages(this.touch),
+    ];
+    this.dotsEl.innerHTML = '';
+    for (let i = 0; i < this.pages.length; i++) {
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = 'tut-dot';
+      dot.setAttribute('aria-label', `Page ${i + 1}`);
+      dot.addEventListener('click', () => this.goTo(i));
+      this.dotsEl.appendChild(dot);
+    }
+  }
+
   open(): void {
+    this.buildPages();
     this.opened = true;
     this.index = 0;
     this.root.classList.add('show');
@@ -233,12 +245,12 @@ export class Tutorial {
 
   private render(): void {
     const page = this.pages[this.index];
-    const gameIndex = this.index - LORE_PAGES.length;
-    const gameTotal = this.pages.length - LORE_PAGES.length;
+    const gameIndex = this.index - this.loreCount;
+    const gameTotal = this.pages.length - this.loreCount;
     this.kindEl.textContent = page.kind === 'lore' ? 'TRANSMISSION' : 'TUTORIEL';
     this.stepEl.textContent =
       page.kind === 'lore'
-        ? `${String(this.index + 1).padStart(2, '0')} / ${String(LORE_PAGES.length).padStart(2, '0')}`
+        ? `${String(this.index + 1).padStart(2, '0')} / ${String(this.loreCount).padStart(2, '0')}`
         : `${String(gameIndex + 1).padStart(2, '0')} / ${String(gameTotal).padStart(2, '0')}`;
     this.titleEl.textContent = page.title;
     this.textEl.textContent = page.kind === 'lore' ? '' : page.text;

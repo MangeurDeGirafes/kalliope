@@ -154,6 +154,33 @@ export const CHARGED = {
   /** Rayon de la frappe circulaire à l'arrivée. */
   sweepRange: 4.5,
   hitstop: 0.14,
+  /** Délai avant de pouvoir recharger une attaque chargée (s, temps réel). */
+  cooldown: 3,
+} as const;
+
+/** Tir chargé du pistolet : maintenir puis relâcher = décharge de chevrotine. */
+export const SHOTGUN = {
+  holdTime: 0.5,
+  showAfter: 0.15,
+  /** Temps de recharge après une décharge (s, temps réel). */
+  cooldown: 1.4,
+  /** Écart angulaire entre deux projectiles (degrés). */
+  spreadDeg: 4.5,
+  range: 60,
+  aimAssist: 0.55,
+  recoil: 0.11,
+} as const;
+
+/** Monowire : fouet monofilament, portée supérieure aux lames, deux touches pour tuer. */
+export const MONOWIRE = {
+  range: 7.5,
+  coneDeg: 30,
+  /** Intervalle entre deux coups de fouet (s). */
+  interval: 0.5,
+  duration: 0.44,
+  activeStart: 0.4,
+  activeEnd: 0.62,
+  damage: 1,
 } as const;
 
 export const PISTOL = {
@@ -189,6 +216,8 @@ export const ENEMIES = {
   projectileRadius: 0.18,
   projectileLifetime: 4,
   projectileDamage: 1,
+  /** Points de vie (lames, pistolet et projectiles renvoyés en retirent 2, le monowire 1). */
+  health: 2,
   activeDistance: 140,
 } as const;
 

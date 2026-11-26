@@ -38,6 +38,10 @@ export interface Enemy {
   yaw: number;
   phase: number;
   time: number;
+  /** Points de vie restants. */
+  hp: number;
+  /** Réaction de touche (secousse + visière blanche). */
+  hurtTimer: number;
 }
 
 interface Projectile {
@@ -162,6 +166,8 @@ export class EnemyManager {
   reset(): void {
     for (const e of this.enemies) {
       e.alive = true;
+      e.hp = ENEMIES.health;
+      e.hurtTimer = 0;
       e.root.visible = true;
       e.state = 'idle';
       e.timer = 0;
@@ -183,8 +189,11 @@ export class EnemyManager {
   // Requêtes de combat
   // ---------------------------------------------------------------------------
 
-  /** Élimine les ennemis à portée de lame dans le cône de visée. Renvoie le nombre de victimes. */
-  meleeSweep(origin: THREE.Vector3, forward: THREE.Vector3, range: number, cosAngle: number): number {
+  /**
+   * Frappe les ennemis à portée dans le cône de visée (dégâts infinis = mort
+   * immédiate). Renvoie le nombre de victimes ; `hits` compte aussi les blessés.
+   */
+  meleeSweep(origin: THREE.Vector3, forward: THREE.Vector3, range: number, cosAngle: number, damage = Infinity, hits?: { count: number }): number {
     let kills = 0;
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -194,8 +203,8 @@ export class EnemyManager {
       if (dist - radius > range) continue;
       const facing = dist < 1e-3 ? 1 : toEnemy.dot(forward) / dist;
       if (facing >= cosAngle || dist < radius + 0.9) {
-        this.kill(e, forward);
-        kills++;
+        if (hits) hits.count++;
+        if (this.damage(e, damage, forward)) kills++;
       }
     }
     return kills;
@@ -291,6 +300,23 @@ export class EnemyManager {
     return count;
   }
 
+  /** Inflige des dégâts ; renvoie vrai si l'ennemi meurt. Une touche non mortelle interrompt sa visée. */
+  damage(e: Enemy, amount: number, hitDir: THREE.Vector3): boolean {
+    if (!e.alive) return false;
+    e.hp -= amount;
+    if (e.hp <= 0) {
+      this.kill(e, hitDir);
+      return true;
+    }
+    e.state = 'cooldown';
+    e.timer = 0.9;
+    e.laser.mesh.visible = false;
+    e.hurtTimer = 0.3;
+    this.particles.sparks(e.center, this.tmp.copy(hitDir).negate(), 0xff8a2b, 26);
+    this.audio.playBladeHit();
+    return false;
+  }
+
   kill(e: Enemy, hitDir: THREE.Vector3): void {
     if (!e.alive) return;
     e.alive = false;
@@ -364,6 +390,14 @@ export class EnemyManager {
       e.body.rotation.x = 0.12 + Math.sin(e.time * 1.3) * 0.05;
       e.body.rotation.z = Math.sin(e.time * 0.9 + e.phase) * 0.08;
       for (const r of e.rotors) r.rotation.y += dt * 40;
+    }
+    // Réaction de touche : secousse et visière qui vire au blanc
+    if (e.hurtTimer > 0) {
+      e.hurtTimer = Math.max(0, e.hurtTimer - dt);
+      const k = e.hurtTimer / 0.3;
+      e.body.position.x = Math.sin(e.time * 90) * 0.06 * k;
+      e.visorMaterial.color.setRGB(4 + k * 6, 0.15 + k * 5, 0.25 + k * 5).multiplyScalar(LIGHTING.enemyGlow);
+      if (e.hurtTimer === 0) this.setVisor(e, 4);
     }
     e.root.updateMatrixWorld(true);
     this.updateCenter(e);
@@ -663,6 +697,8 @@ export class EnemyManager {
       aimPoint: new THREE.Vector3(),
       center: new THREE.Vector3(),
       alive: true,
+      hp: ENEMIES.health,
+      hurtTimer: 0,
       state: 'idle',
       timer: 0,
       losTimer: 0,
@@ -725,6 +761,8 @@ export class EnemyManager {
       aimPoint: new THREE.Vector3(),
       center: new THREE.Vector3(),
       alive: true,
+      hp: ENEMIES.health,
+      hurtTimer: 0,
       state: 'idle',
       timer: 0,
       losTimer: 0,

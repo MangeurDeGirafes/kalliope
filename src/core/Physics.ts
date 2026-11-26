@@ -31,12 +31,13 @@ export class Physics {
     this.ignored = collider;
   }
 
-  addBox(center: THREE.Vector3, halfExtents: THREE.Vector3, rotationY = 0): RAPIER.Collider {
+  /** Boîte statique ; `rotationX` incline la boîte (rampes invisibles sous les escaliers). */
+  addBox(center: THREE.Vector3, halfExtents: THREE.Vector3, rotationY = 0, rotationX = 0): RAPIER.Collider {
     const desc = RAPIER.ColliderDesc.cuboid(halfExtents.x, halfExtents.y, halfExtents.z)
       .setTranslation(center.x, center.y, center.z)
       .setFriction(0);
-    if (rotationY !== 0) {
-      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
+    if (rotationY !== 0 || rotationX !== 0) {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rotationX, rotationY, 0, 'YXZ'));
       desc.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
     }
     return this.world.createCollider(desc);

@@ -1170,6 +1170,22 @@ body.touch-mode {
   opacity: 1;
   transform: scale(1);
 }
+.weapon-slot.locked {
+  display: none;
+}
+/* Recharge : anneau fin et discret qui se remplit */
+.charge-ring.cooling {
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  opacity: 0.55;
+  background: conic-gradient(rgba(232, 246, 255, 0.55) calc(var(--charge) * 1%), rgba(232, 246, 255, 0.08) 0);
+  -webkit-mask: radial-gradient(circle, transparent 15px, #000 16px);
+  mask: radial-gradient(circle, transparent 15px, #000 16px);
+}
+.charge-ring.pistol:not(.cooling) {
+  background: conic-gradient(var(--yellow) calc(var(--charge) * 1%), rgba(232, 246, 255, 0.14) 0);
+}
 .charge-ring.ready {
   background: conic-gradient(var(--cyan) 100%, transparent 0);
   animation: charge-pulse 0.3s infinite alternate;
@@ -1781,5 +1797,355 @@ body.tutorial-open .rotate-hint {
   }
   .shop-desc {
     font-size: 12px;
+  }
+}
+
+/* ================================================================ MONOWIRE / HISTOIRE / SECRETS */
+
+/* Monowire : arc large orange (portée longue) */
+.crosshair.monowire .tick {
+  width: 14px;
+  height: 2px;
+  background: #ffb070;
+  box-shadow: 0 0 6px #ff6a1a;
+}
+.crosshair.monowire .t0 {
+  left: -34px;
+  top: -1px;
+}
+.crosshair.monowire .t1 {
+  left: 20px;
+  top: -1px;
+}
+.crosshair.monowire .t2 {
+  left: -27px;
+  top: -12px;
+  transform: rotate(-25deg);
+}
+.crosshair.monowire .t3 {
+  left: 13px;
+  top: -12px;
+  transform: rotate(25deg);
+}
+
+.story-line {
+  margin-top: 12px;
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  color: #9fd8ff;
+  opacity: 0.85;
+}
+.sibling-btn {
+  color: #9fd8ff;
+  border-color: rgba(159, 216, 255, 0.6);
+  background: rgba(5, 20, 35, 0.5);
+  box-shadow: none;
+}
+
+/* Écran d'arrivée avec log audio : deux colonnes quand la place le permet */
+.panel.small.with-log {
+  max-width: 900px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 22px;
+  align-items: center;
+}
+@media (max-width: 760px) {
+  .panel.small.with-log {
+    grid-template-columns: 1fr;
+  }
+}
+.audio-log {
+  text-align: left;
+  padding: 14px 16px 16px;
+  border: 1px solid rgba(159, 216, 255, 0.35);
+  border-left: 3px solid #9fd8ff;
+  background: rgba(5, 10, 22, 0.7);
+  cursor: pointer;
+}
+.log-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: #9fd8ff;
+}
+.log-wave {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+.log-wave i {
+  width: 3px;
+  background: #9fd8ff;
+  animation: wave 0.9s ease-in-out infinite alternate;
+}
+.log-wave i:nth-child(2) {
+  animation-delay: -0.3s;
+}
+.log-wave i:nth-child(3) {
+  animation-delay: -0.6s;
+}
+.log-wave i:nth-child(4) {
+  animation-delay: -0.15s;
+}
+.log-wave i:nth-child(5) {
+  animation-delay: -0.45s;
+}
+@keyframes wave {
+  from {
+    height: 3px;
+  }
+  to {
+    height: 14px;
+  }
+}
+.log-from {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  opacity: 0.6;
+}
+.log-text {
+  margin-top: 10px;
+  min-height: 7em;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #e8f2ff;
+  text-transform: none;
+  font-style: italic;
+}
+.log-compact {
+  margin-top: 12px;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: #9fd8ff;
+  opacity: 0.8;
+}
+.touch-mode .log-text {
+  min-height: 0;
+  font-size: 12px;
+}
+.touch-mode .panel.small.with-log {
+  gap: 10px;
+}
+
+/* Objectif de quête (Plaza) */
+.hud-objective {
+  display: none;
+  margin-top: 3px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  color: #fff;
+  text-shadow: 0 0 8px var(--yellow);
+}
+.hud-objective.show {
+  display: block;
+}
+
+/* Fondu des ascenseurs */
+.hud-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 18;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+.hud-fade.show {
+  animation: fade-flash 0.7s ease-out;
+}
+@keyframes fade-flash {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Secret trouvé : encart discret */
+.hud-secret {
+  position: absolute;
+  right: 22px;
+  top: 64px;
+  width: min(340px, 40%);
+  padding: 9px 12px 10px;
+  text-transform: none;
+  background: rgba(8, 4, 18, 0.78);
+  border: 1px solid rgba(255, 210, 59, 0.45);
+  border-right: 3px solid var(--yellow);
+  opacity: 0;
+  transform: translateX(12px);
+  transition: opacity 0.3s, transform 0.3s;
+}
+.hud-secret.show {
+  opacity: 1;
+  transform: none;
+}
+.sec-title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--yellow);
+}
+.sec-text {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #f2ecff;
+}
+.touch-mode .hud-secret {
+  right: auto;
+  left: 50%;
+  top: 22%;
+  width: min(380px, 56%);
+  transform: translateX(-50%);
+}
+.touch-mode .hud-secret.show {
+  transform: translateX(-50%);
+}
+
+/* Journal */
+.journal-panel {
+  width: min(720px, calc(100% - 24px));
+}
+.jr-sibling {
+  padding: 8px 12px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: #9fd8ff;
+  background: rgba(5, 20, 35, 0.6);
+  border: 1px solid rgba(159, 216, 255, 0.6);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.jr-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 10px;
+}
+.jr-tab {
+  padding: 8px 12px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgba(232, 246, 255, 0.7);
+  background: transparent;
+  border: 1px solid rgba(232, 246, 255, 0.2);
+  cursor: pointer;
+}
+.jr-tab.active {
+  color: #fff;
+  border-color: #9fd8ff;
+  box-shadow: inset 0 -2px 0 #9fd8ff;
+}
+.jr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+.jr-entry {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+.jr-entry.locked {
+  opacity: 0.55;
+}
+.jr-title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #9fd8ff;
+}
+.jr-title span {
+  margin-left: 10px;
+  font-family: var(--font-ui);
+  letter-spacing: 0.15em;
+  color: rgba(232, 246, 255, 0.5);
+}
+.jr-text {
+  margin-top: 5px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #e8f2ff;
+}
+.jr-entry.quest.done .jr-title {
+  color: var(--green);
+}
+.jr-entry.quest.active .jr-title {
+  color: var(--yellow);
+}
+.jr-sibling:focus-visible,
+.jr-tab:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+/* Écran titre plus compact (boutons supplémentaires : Plaza, journal, Sacha) */
+.overlay .panel {
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+}
+.overlay.start .btn-row {
+  gap: 8px 10px;
+  margin-top: 4px;
+}
+.overlay.start .btn-row .overlay-btn {
+  margin-top: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+}
+.overlay.start .cta {
+  margin-top: 14px;
+}
+@media (max-height: 640px) {
+  .overlay.start .title {
+    font-size: clamp(32px, 6vw, 54px);
+  }
+  .overlay.start .panel {
+    padding: 22px 30px;
+  }
+  .overlay.start .pick {
+    margin-top: 12px;
+  }
+  .overlay.start .quick-keys {
+    margin-top: 8px;
+  }
+}
+.touch-mode .overlay.start .btn-row .overlay-btn {
+  margin-top: 6px;
+  padding: 7px 10px;
+  font-size: 11px;
+}
+.touch-mode .story-line {
+  margin-top: 6px;
+  font-size: 10px;
+}
+@media (max-height: 440px) {
+  .touch-mode .overlay.start .lc-sub,
+  .touch-mode .overlay.start .sub {
+    display: none;
+  }
+  .touch-mode .overlay.start .title {
+    font-size: 26px;
+  }
+  .touch-mode .overlay.start .subtitle {
+    margin-top: 2px;
+  }
+  .touch-mode .overlay.start .cta {
+    margin-top: 8px;
+    font-size: 12px;
+  }
+  .touch-mode .overlay.start .level-card {
+    padding: 7px 9px 6px;
   }
 }

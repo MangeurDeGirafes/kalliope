@@ -38,6 +38,32 @@ export interface BuildingDef {
   roof: RoofStyle;
   /** Graine des accessoires de toit (absente = toit nu). */
   props?: number;
+  /** Toit secondaire hors du parcours (secrets) : ignoré par l'enchaînement. */
+  side?: boolean;
+}
+
+export type SecretKind = 'vinyl' | 'tag' | 'beacon24' | 'payphone' | 'garden' | 'crane' | 'watertower';
+
+/** Easter egg caché dans un niveau : trouvé en s'approchant ou en tirant dessus. */
+export interface SecretDef {
+  id: string;
+  kind: SecretKind;
+  /** Pied de l'objet. */
+  pos: Vec3;
+  /** Orientation (radians) : direction de la face principale. */
+  yaw?: number;
+  /** Rayon de découverte par proximité (m) ; 0 = seulement en tirant dessus. */
+  radius: number;
+  /** Peut être découvert d'un tir de pistolet. */
+  shootable?: boolean;
+  /** Centre de la zone de touche, relatif à `pos`. */
+  hit?: Vec3;
+  name: string;
+  text: string;
+  /** Indice vendu par l'Indic à la Plaza. */
+  hint: string;
+  /** Point d'appel sur le toit principal (x, z) gardé libre d'accessoires. */
+  approach?: [number, number];
 }
 
 export interface WallDef {
@@ -120,6 +146,8 @@ export interface LevelDef {
   signs?: SignDef[];
   finish: Vec3;
   theme: ThemeDef;
+  /** Easter eggs du niveau. */
+  secrets?: SecretDef[];
 }
 
 // -----------------------------------------------------------------------------
@@ -179,6 +207,32 @@ const NEON_ROOFTOPS: LevelDef = {
     platform(4, -255, 6, 'amber', 6),
     platform(-2, -266, 7, 'cyan', 1),
     { x: 0, z: -291, w: 20, d: 30, top: 9, trim: 'warm', facade: 7, roof: 'tar', props: 67 },
+    { x: 14.5, z: -20, w: 7, d: 8, top: 1.5, trim: 'amber', facade: 6, roof: 'tar', side: true },
+  ],
+  secrets: [
+    {
+      id: 'vinyl',
+      approach: [7.2, -20],
+      kind: 'vinyl',
+      pos: [14, 1.5, -21],
+      yaw: -Math.PI / 2,
+      radius: 2.6,
+      name: 'LA PLATINE',
+      text: 'Un vieux vinyle tourne encore, lueur chaude sous la pluie. Sacha disait que la musique tient chaud quand la ville est froide.',
+      hint: 'Juste après le départ, un petit toit se cache sur la droite. Saute de côté.',
+    },
+    {
+      id: 'tag',
+      approach: [-6.5, -168],
+      kind: 'tag',
+      pos: [-5.5, 8, -170],
+      yaw: -Math.PI / 2,
+      radius: 2.4,
+      hit: [-1.4, 1.4, 0],
+      name: 'TAG DE RUNNER',
+      text: 'Une flèche vers le ciel et une signature : S. « Toujours en haut. » La devise que Sacha peignait sur chaque toit conquis.',
+      hint: 'Sur le toit rouge après le tremplin, fais le tour du bloc technique, côté vide.',
+    },
   ],
   walls: [
     { x: 3.9, z0: -71, z1: -90, top: 9, face: -1, ad: 'vertigo' },
@@ -266,6 +320,32 @@ const NIGHT_MARKET: LevelDef = {
     roof(0, -135, -165, -0.5, 16, 'red', 3, 'rust', 104),
     roof(0, -197, -225, -1, 18, 'lime', 5, 'concrete', 105),
     roof(0, -249, -281, -5, 20, 'warm', 0, 'tar', 106),
+    { x: -19, z: -112, w: 6, d: 6, top: 9, trim: 'yellow', facade: 2, roof: 'concrete', side: true },
+    { x: -15.5, z: -52, w: 11, d: 14, top: -2.5, trim: 'teal', facade: 3, roof: 'tar', side: true },
+  ],
+  secrets: [
+    {
+      id: 'beacon24',
+      kind: 'beacon24',
+      pos: [-19, 9, -112],
+      radius: 0,
+      shootable: true,
+      hit: [0, 2.6, 0],
+      name: 'BALISE 24',
+      text: 'Une balise bonus marquée 24 s\'allume sous ton tir. 24, comme les étages de votre ancien immeuble.',
+      hint: 'Au-dessus du marché, une tour isolée clignote sur la gauche. Vise-la au pistolet.',
+    },
+    {
+      id: 'payphone',
+      approach: [-8.2, -52],
+      kind: 'payphone',
+      pos: [-17, -2.5, -56],
+      yaw: Math.PI / 2,
+      radius: 2.4,
+      name: 'CABINE FANTÔME',
+      text: 'Le téléphone sonne. Tu décroches. Une voix enregistrée : « Toujours en hauteur. Jamais dans la rue. » Puis plus rien.',
+      hint: 'Sur le deuxième toit, un toit plus bas se cache à gauche. Laisse-toi tomber, puis remonte.',
+    },
   ],
   walls: [...wallPair(-66, 0, 'ramen', 'cat'), ...wallPair(-165, -0.5, 'koi', 'arcade'), descentWall(-225, -1, 'cola')],
   barriers: [
@@ -320,6 +400,30 @@ const GLASS_TOWERS: LevelDef = {
     platform(2, -169, 9, 'pink', 1),
     roof(0, -180, -212, 9, 18, 'yellow', 7, 'tar', 205),
     roof(0, -222, -252, 17, 20, 'warm', 7, 'concrete', 206),
+    { x: 14.5, z: -90, w: 7, d: 10, top: 18, trim: 'green', facade: 5, roof: 'green', side: true },
+  ],
+  secrets: [
+    {
+      id: 'garden',
+      approach: [7.2, -90],
+      kind: 'garden',
+      pos: [14.5, 18, -90],
+      radius: 3.4,
+      name: 'JARDIN SUSPENDU',
+      text: 'Un bonsaï, un filet d\'eau, des lucioles. Ici, la pluie fait un bruit doux. Loin d\'Aegis, l\'espace d\'un souffle.',
+      hint: 'Sur la plus haute tour, regarde à droite : un îlot vert flotte un peu plus haut.',
+    },
+    {
+      id: 'crane',
+      kind: 'crane',
+      pos: [-7, 9, -203],
+      radius: 1.8,
+      shootable: true,
+      hit: [0, 7.4, 0],
+      name: 'GRUE DE PAPIER',
+      text: 'Une grue en origami descend en planant, pliée dans un rapport d\'Aegis. Sacha en pliait une à chaque nuit blanche.',
+      hint: 'Avant le dernier tremplin, une antenne à gauche porte un petit oiseau blanc. Tire dessus.',
+    },
   ],
   walls: [],
   barriers: [],
@@ -366,6 +470,21 @@ const THE_FALL: LevelDef = {
     roof(0, -86, -114, 21, 18, 'purple', 4, 'concrete', 303),
     roof(0, -128, -158, 15, 16, 'amber', 0, 'tar', 304),
     roof(0, -190, -236, 14.5, 24, 'red', 2, 'tar', 305),
+    { x: -14, z: -8, w: 7, d: 8, top: 28, trim: 'purple', facade: 4, roof: 'rust', side: true },
+  ],
+  secrets: [
+    {
+      id: 'watertower',
+      approach: [-7.2, -8],
+      kind: 'watertower',
+      pos: [-14, 28, -8],
+      yaw: Math.PI / 2,
+      radius: 3.6,
+      hit: [0, 2.4, 0],
+      name: 'LE CHÂTEAU D\'EAU',
+      text: 'Un prénom gravé dans le métal, SACHA, suivi de « et toi ». Et une longue rangée de traits : les drones que vous comptiez ensemble, la nuit.',
+      hint: 'Dès le départ de La Chute, regarde à gauche : un château d\'eau sur un toit plus bas.',
+    },
   ],
   walls: [descentWall(-62, 25, 'vertigo'), ...wallPair(-158, 15, 'arcade', 'pharmacy')],
   barriers: [{ x: 0, z: -46, roofWidth: 16, roofY: 25 }],
