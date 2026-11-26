@@ -173,7 +173,7 @@ export const SHOTGUN = {
 
 /** Monowire : fouet monofilament, portée supérieure aux lames, deux touches pour tuer. */
 export const MONOWIRE = {
-  range: 7.5,
+  range: 10,
   coneDeg: 30,
   /** Intervalle entre deux coups de fouet (s). */
   interval: 0.5,
@@ -181,6 +181,15 @@ export const MONOWIRE = {
   activeStart: 0.4,
   activeEnd: 0.62,
   damage: 1,
+  /** Attaque chargée : maintenir puis relâcher = double balayage circulaire autour du joueur. */
+  chargeHold: 0.45,
+  chargeShowAfter: 0.12,
+  /** Rayon de la zone balayée (m). */
+  chargeRadius: 12,
+  /** Durée totale des deux balayages (s). */
+  chargeDuration: 0.85,
+  /** Recharge de l'attaque chargée (s, temps réel). */
+  chargeCooldown: 4,
 } as const;
 
 export const PISTOL = {

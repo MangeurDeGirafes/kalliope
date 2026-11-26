@@ -363,19 +363,20 @@ export class HUD {
    * Jauge circulaire autour du réticule : charge en cours (lames ou chevrotine),
    * ou recharge (`cooldown` de 0 à 1, -1 = disponible) affichée en discret.
    */
-  setCharge(level: number, visible: boolean, cooldown = -1, kind: 'blades' | 'pistol' = 'blades'): void {
+  setCharge(level: number, visible: boolean, cooldown = -1, kind: WeaponId = 'blades'): void {
     const ready = visible && level >= 1;
     const cooling = !visible && cooldown >= 0;
     const q = visible ? Math.min(99, Math.floor(level * 100)) : cooling ? Math.floor(cooldown * 100) : -1;
-    const key = (ready ? 1000 : q) + (cooling ? 2000 : 0) + (kind === 'pistol' ? 5000 : 0);
+    const key = (ready ? 1000 : q) + (cooling ? 2000 : 0) + (kind === 'pistol' ? 5000 : kind === 'monowire' ? 10000 : 0);
     if (key === this.lastCharge) return;
     this.lastCharge = key;
     this.chargeRing.classList.toggle('show', visible || cooling);
     this.chargeRing.classList.toggle('ready', ready);
     this.chargeRing.classList.toggle('cooling', cooling);
     this.chargeRing.classList.toggle('pistol', kind === 'pistol');
+    this.chargeRing.classList.toggle('monowire', kind === 'monowire');
     this.chargeLabel.classList.toggle('show', ready);
-    this.chargeLabel.textContent = kind === 'pistol' ? 'CHEVROTINE !' : 'RELÂCHE !';
+    this.chargeLabel.textContent = kind === 'pistol' ? 'CHEVROTINE !' : kind === 'monowire' ? 'BALAYAGE !' : 'RELÂCHE !';
     this.chargeRing.style.setProperty('--charge', String(ready ? 100 : Math.max(0, q)));
   }
 

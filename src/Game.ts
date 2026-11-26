@@ -218,7 +218,7 @@ export class Game {
     this.hud.onLevelSelect = (index) => this.startGame(index);
     this.hud.onNextClick = () => this.goToPlaza((this.currentLevel + 1) % LEVELS.length);
     this.hud.onMenuClick = () => this.showMenu();
-    this.hud.onPlazaClick = () => this.goToPlaza(this.currentLevel);
+    this.hud.onPlazaClick = () => this.goToPlaza(this.nextLevelToPlay());
 
     this.shop.onBuy = (id) => this.buyUpgrade(id);
     this.shop.onClose = () => {
@@ -471,7 +471,7 @@ export class Game {
       this.weapons.chargeLevel,
       this.weapons.chargeVisible || this.weapons.isChargeStriking,
       this.weapons.isChargeStriking ? -1 : this.weapons.chargeCooldownProgress,
-      this.weapons.current === 'pistol' ? 'pistol' : 'blades',
+      this.weapons.current,
     );
     this.touch?.update({
       weapon: this.weapons.current,
@@ -705,17 +705,29 @@ export class Game {
       this.hud.flashMessage('RETOUR À LA PLAZA', '#ff7ad9', 1200);
       this.director.onRespawn();
     }
-    // Sortie : la balise dorée lance le niveau suivant
+    // Téléporteurs (entrée et bout de la rue) : direction le niveau suivant
+    const p = this.player.position;
     const f = this.levelData.finish;
-    const dx = this.player.position.x - f.position.x;
-    const dz = this.player.position.z - f.position.z;
-    if (dx * dx + dz * dz < f.radius * f.radius && Math.abs(this.player.feetY - f.position.y) < 3) {
+    const inBeacon = (p.x - f.position.x) ** 2 + (p.z - f.position.z) ** 2 < f.radius * f.radius && Math.abs(this.player.feetY - f.position.y) < 3;
+    const inPad = this.plaza.teleporters.some((t) => (p.x - t.x) ** 2 + (p.z - t.z) ** 2 < 1.5 * 1.5 && Math.abs(this.player.feetY - t.y) < 1.5);
+    if (inBeacon || inPad) {
+      this.hud.fade();
+      this.audio.playElevator();
       this.loadLevel(this.plazaNext);
       this.restart();
       return;
     }
     this.director.update(dt);
     this.hud.setObjective(this.director.objective());
+  }
+
+  /**
+   * Niveau « suivant » quand on entre à la Plaza depuis le menu : celui d'après
+   * si le niveau courant est déjà terminé, sinon le niveau courant.
+   */
+  private nextLevelToPlay(): number {
+    const done = this.loadBestTime(this.currentLevel) !== null;
+    return done ? (this.currentLevel + 1) % LEVELS.length : this.currentLevel;
   }
 
   /** Ascenseurs de la Plaza : fondu au noir et téléportation. */

@@ -123,6 +123,16 @@ export class WeaponManager {
   private wireCooldown = 0;
   /** Coup de fouet demandé pendant la récupération (mémorisé brièvement). */
   private wireBuffer = 0;
+  /** Maintien du monowire (charge du double balayage) ; -1 = aucun. */
+  private wireHold = -1;
+  private wireReadyPlayed = false;
+  /** Double balayage en cours : temps écoulé (s), ou -1. */
+  private spinTime = -1;
+  private readonly spinHits = [false, false];
+  private wireChargeCooldown = 0;
+  private readonly shockRing: THREE.Mesh;
+  private readonly shockMat: THREE.MeshBasicMaterial;
+  private shockTime = -1;
 
   // État
   private switchTimer = 0;
@@ -186,6 +196,20 @@ export class WeaponManager {
     this.buildBlades();
     this.pistolCoreMat = this.buildPistol();
     this.wire = this.buildMonowire();
+    // Onde de choc au sol du double balayage
+    this.shockMat = new THREE.MeshBasicMaterial({
+      color: ORANGE.clone().multiplyScalar(2.5 * LIGHTING.effects),
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    this.shockRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 64), this.shockMat);
+    this.shockRing.rotation.x = -Math.PI / 2;
+    this.shockRing.visible = false;
+    engine.scene.add(this.shockRing);
 
     // Flash de bouche
     const flashMat = new THREE.MeshBasicMaterial({
@@ -240,6 +264,11 @@ export class WeaponManager {
     this.shotgunCooldown = 0;
     this.whipTime = -1;
     this.wireCooldown = 0;
+    this.wireHold = -1;
+    this.spinTime = -1;
+    this.wireChargeCooldown = 0;
+    this.shockTime = -1;
+    this.shockRing.visible = false;
     if (!this.unlocked.has(this.current)) {
       this.current = 'blades';
       this.applyVisibility();
@@ -253,12 +282,14 @@ export class WeaponManager {
   /** Niveau de charge de l'arme courante (0 → 1) : attaque chargée ou chevrotine. */
   get chargeLevel(): number {
     if (this.current === 'pistol') return this.pistolHold < 0 ? 0 : Math.min(1, this.pistolHold / SHOTGUN.holdTime);
+    if (this.current === 'monowire') return this.wireHold < 0 ? 0 : Math.min(1, this.wireHold / MONOWIRE.chargeHold);
     return this.chargeHold < 0 ? 0 : Math.min(1, this.chargeHold / CHARGED.holdTime);
   }
 
   /** La jauge de charge est affichée (maintien au-delà d'un simple clic). */
   get chargeVisible(): boolean {
     if (this.current === 'pistol') return this.pistolHold >= SHOTGUN.showAfter;
+    if (this.current === 'monowire') return this.wireHold >= MONOWIRE.chargeShowAfter;
     return this.chargeHold >= CHARGED.showAfter && this.current === 'blades';
   }
 
@@ -266,6 +297,7 @@ export class WeaponManager {
   get chargeCooldownProgress(): number {
     if (this.current === 'blades' && this.chargeCooldown > 0) return 1 - this.chargeCooldown / STATS.chargeCooldown;
     if (this.current === 'pistol' && this.shotgunCooldown > 0) return 1 - this.shotgunCooldown / SHOTGUN.cooldown;
+    if (this.current === 'monowire' && this.wireChargeCooldown > 0) return 1 - this.wireChargeCooldown / STATS.wireChargeCooldown;
     return -1;
   }
 
@@ -277,8 +309,9 @@ export class WeaponManager {
     this.arms[1].model.setColor(this.armColors[1]);
   }
 
+  /** Attaque chargée en cours (dash des lames ou double balayage du monowire). */
   get isChargeStriking(): boolean {
-    return this.chargeStriking;
+    return this.chargeStriking || this.spinTime >= 0;
   }
 
   get isSwitching(): boolean {
@@ -292,6 +325,7 @@ export class WeaponManager {
     this.wireCooldown = Math.max(0, this.wireCooldown - dt);
     this.chargeCooldown = Math.max(0, this.chargeCooldown - realDt);
     this.shotgunCooldown = Math.max(0, this.shotgunCooldown - realDt);
+    this.wireChargeCooldown = Math.max(0, this.wireChargeCooldown - realDt);
 
     if (controlsEnabled && this.player.alive) {
       if (input.wasPressed('weapon1')) this.requestSwitch('blades');
@@ -312,6 +346,8 @@ export class WeaponManager {
     }
     if (this.current !== 'blades' || this.switchTimer > 0) this.cancelCharge();
     if (this.current !== 'pistol' || this.switchTimer > 0 || !controlsEnabled) this.pistolHold = -1;
+    if (this.current !== 'monowire' || this.switchTimer > 0 || !controlsEnabled) this.wireHold = -1;
+    this.updateShock(realDt);
     this.audio.setCharge(this.chargeVisible ? this.chargeLevel : 0);
     this.updateChargedStrike();
 
@@ -339,7 +375,7 @@ export class WeaponManager {
   private requestSwitch(id: WeaponId): void {
     if (!this.unlocked.has(id)) return;
     if (id === this.current && this.switchTimer <= 0) return;
-    if (this.chargeStriking) return;
+    if (this.chargeStriking || this.spinTime >= 0) return;
     if (this.pendingWeapon === id) return;
     this.pendingWeapon = id;
     this.switchTimer = SWITCH_TIME;
@@ -881,13 +917,82 @@ export class WeaponManager {
   // Monowire
   // ---------------------------------------------------------------------------
 
-  /** Clic = un coup (mémorisé s'il arrive un peu tôt), maintien = coups enchaînés. */
+  /** Clic = un coup de fouet (mémorisé s'il arrive un peu tôt) ; maintien puis relâche = double balayage. */
   private updateWireInput(input: InputManager, realDt: number): void {
     this.wireBuffer = Math.max(0, this.wireBuffer - realDt);
-    if (input.wasMousePressed(MouseButton.Left)) this.wireBuffer = 0.25;
-    if ((this.wireBuffer > 0 || input.isMouseDown(MouseButton.Left)) && this.wireCooldown <= 0 && this.whipTime < 0) {
+    if (input.wasMousePressed(MouseButton.Left)) {
+      this.wireBuffer = 0.25;
+      this.wireHold = this.wireChargeCooldown > 0 || this.spinTime >= 0 ? -1 : 0;
+      this.wireReadyPlayed = false;
+    }
+    if (this.wireBuffer > 0 && this.wireCooldown <= 0 && this.whipTime < 0 && this.spinTime < 0) {
       this.wireBuffer = 0;
       this.startWhip();
+    }
+    if (this.wireHold < 0) return;
+    if (input.isMouseDown(MouseButton.Left)) {
+      this.wireHold += realDt;
+      if (this.wireHold >= MONOWIRE.chargeHold && !this.wireReadyPlayed) {
+        this.wireReadyPlayed = true;
+        this.audio.playChargeReady();
+        vibrate(30);
+      }
+    } else {
+      const ready = this.wireHold >= MONOWIRE.chargeHold;
+      this.wireHold = -1;
+      if (ready) this.startSpin();
+    }
+  }
+
+  /** Double balayage : le fil tourne deux fois autour du joueur, chaque passage touche toute la zone. */
+  private startSpin(): void {
+    this.spinTime = 0;
+    this.spinHits[0] = false;
+    this.spinHits[1] = false;
+    this.whipTime = -1;
+    this.wireChargeCooldown = STATS.wireChargeCooldown;
+    this.audio.playChargedStrike();
+    vibrate(40);
+  }
+
+  /** Un passage du balayage : 1 dégât à tous les ennemis de la zone, projectiles renvoyés. */
+  private spinStrike(): void {
+    const eye = this.engine.camera.position;
+    const forward = this.player.getLookDirection(this.tmp);
+    const radius = STATS.wireChargeRadius;
+    const hits = { count: 0 };
+    this.enemies.meleeSweep(eye, forward, radius, -1, MONOWIRE.damage, hits);
+    this.enemies.deflectProjectiles(eye, forward, radius * 0.6, -1);
+    this.audio.playWhip();
+    // Onde de choc au sol et étincelles sur le cercle balayé
+    const p = this.player.position;
+    this.shockTime = 0;
+    this.shockRing.position.set(p.x, this.player.feetY + 0.12, p.z);
+    this.shockRing.visible = true;
+    for (let k = 0; k < 14; k++) {
+      const a = (k / 14) * Math.PI * 2;
+      const dir = this.tmp2.set(Math.cos(a), 0, Math.sin(a));
+      const at = new THREE.Vector3(p.x + dir.x * radius * 0.85, eye.y - 0.6, p.z + dir.z * radius * 0.85);
+      this.particles.sparks(at, dir, 0xff8a2b, 5);
+    }
+    if (hits.count > 0) {
+      vibrate(45);
+      this.onChargedStrike?.();
+    } else {
+      this.player.addShake(0.25);
+    }
+  }
+
+  private updateShock(realDt: number): void {
+    if (this.shockTime < 0) return;
+    this.shockTime += realDt;
+    const k = Math.min(1, this.shockTime / 0.35);
+    const r = 1 + (STATS.wireChargeRadius - 1) * easeOutCubic(k);
+    this.shockRing.scale.set(r, r, r);
+    this.shockMat.opacity = 0.85 * (1 - k);
+    if (k >= 1) {
+      this.shockTime = -1;
+      this.shockRing.visible = false;
     }
   }
 
@@ -927,6 +1032,33 @@ export class WeaponManager {
         u = -1;
       }
     }
+    // Attaque chargée : deux balayages (gauche → droite puis droite → gauche)
+    let spinAngle: number | null = null;
+    let spinLag = 0;
+    if (this.spinTime >= 0) {
+      this.spinTime += dt;
+      const v = this.spinTime / MONOWIRE.chargeDuration;
+      if (v >= 0.27 && !this.spinHits[0]) {
+        this.spinHits[0] = true;
+        this.spinStrike();
+      }
+      if (v >= 0.69 && !this.spinHits[1]) {
+        this.spinHits[1] = true;
+        this.spinStrike();
+      }
+      if (v >= 1) {
+        this.spinTime = -1;
+      } else {
+        const A = THREE.MathUtils.degToRad(165);
+        if (v < 0.48) {
+          spinAngle = A - 2 * A * easeInOutCubic(THREE.MathUtils.clamp((v - 0.06) / 0.42, 0, 1));
+          spinLag = 0.55;
+        } else {
+          spinAngle = -A + 2 * A * easeInOutCubic(THREE.MathUtils.clamp((v - 0.52) / 0.42, 0, 1));
+          spinLag = -0.55;
+        }
+      }
+    }
     if (this.current !== 'monowire') return;
 
     // Balancement du bras pendant le coup
@@ -936,7 +1068,11 @@ export class WeaponManager {
       else if (u < 0.62) swing = -1 + 1.8 * easeInOutCubic((u - 0.38) / 0.24);
       else swing = 0.8 * (1 - easeInOutCubic((u - 0.62) / 0.38));
     }
-    this.monowireGroup.rotation.set(0.05 + swing * 0.45, 0.1 - swing * 0.15, -swing * 0.3);
+    if (spinAngle !== null) {
+      this.monowireGroup.rotation.set(-0.3, 0.1 + spinAngle * 0.25, spinAngle * 0.35);
+    } else {
+      this.monowireGroup.rotation.set(0.05 + swing * 0.45, 0.1 - swing * 0.15, -swing * 0.3);
+    }
     this.monowireGroup.position.set(0.2, -0.2 - Math.min(0, swing) * 0.06, -0.36 - Math.max(0, swing) * 0.08);
     this.monowireGroup.updateMatrixWorld(true);
 
@@ -969,6 +1105,19 @@ export class WeaponManager {
         C.copy(S).lerp(T, 0.5).lerp(idleC, k);
       }
     }
+    if (spinAngle !== null) {
+      // Le fil décrit un grand cercle autour du joueur (repère monde → caméra)
+      const eye = this.engine.camera.position;
+      const yaw = this.player.yaw;
+      const R = STATS.wireChargeRadius * 0.92;
+      const a = yaw + spinAngle;
+      E.set(eye.x - Math.sin(a) * R, eye.y - 0.5, eye.z - Math.cos(a) * R);
+      this.root.worldToLocal(E);
+      const b = a + spinLag;
+      C.set(eye.x - Math.sin(b) * R * 0.45, eye.y - 0.2, eye.z - Math.cos(b) * R * 0.45);
+      this.root.worldToLocal(C);
+    }
+    const spinning = spinAngle !== null;
     const thickness = u >= 0 ? 0.011 : 0.007;
     const point = (t: number, out: THREE.Vector3) => {
       const a = (1 - t) * (1 - t);
@@ -983,7 +1132,8 @@ export class WeaponManager {
       const len = p0.distanceTo(p1);
       d.position.copy(p0).add(p1).multiplyScalar(0.5);
       d.lookAt(p1);
-      d.scale.set(thickness, thickness, Math.max(0.001, len * 1.08));
+      const th = spinning ? 0.012 + (i / WIRE_SEGMENTS) * 0.06 : thickness;
+      d.scale.set(th, th, Math.max(0.001, len * 1.08));
       d.updateMatrix();
       this.wire.setMatrixAt(i, d.matrix);
     }

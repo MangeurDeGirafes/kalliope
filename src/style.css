@@ -1183,6 +1183,9 @@ body.touch-mode {
   -webkit-mask: radial-gradient(circle, transparent 15px, #000 16px);
   mask: radial-gradient(circle, transparent 15px, #000 16px);
 }
+.charge-ring.monowire:not(.cooling) {
+  background: conic-gradient(#ff8a2b calc(var(--charge) * 1%), rgba(232, 246, 255, 0.14) 0);
+}
 .charge-ring.pistol:not(.cooling) {
   background: conic-gradient(var(--yellow) calc(var(--charge) * 1%), rgba(232, 246, 255, 0.14) 0);
 }

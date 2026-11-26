@@ -27,10 +27,10 @@ export const UPGRADES: readonly UpgradeDef[] = [
   { id: 'blades', vendor: 'atelier', name: 'LAMES ALLONGÉES', desc: 'Portée des lames +25 % et fente plus longue.', price: 150 },
   { id: 'airjump', vendor: 'atelier', name: 'RESSORTS DE MOLLETS', desc: 'Un saut en l\'air de plus : triple saut.', price: 320 },
   { id: 'magnet', vendor: 'atelier', name: 'PUCE DE NÉGOCE', desc: 'Crédits gagnés en fin de niveau +25 %.', price: 180 },
-  { id: 'coolant', vendor: 'clinic', name: 'REFROIDISSEUR', desc: 'L\'attaque chargée des lames se recharge 40 % plus vite.', price: 150 },
-  { id: 'monowire', vendor: 'armory', name: 'MONOWIRE', desc: 'Fouet monofilament : portée 7,5 m, deux touches pour tuer. Touche 3.', price: 240 },
+  { id: 'coolant', vendor: 'clinic', name: 'REFROIDISSEUR', desc: 'Les attaques chargées (lames, monowire) se rechargent 40 % plus vite.', price: 150 },
+  { id: 'monowire', vendor: 'armory', name: 'MONOWIRE', desc: 'Fouet monofilament : portée 10 m, deux touches pour tuer. Maintenir puis relâcher : double balayage de zone. Touche 3.', price: 240 },
   { id: 'buckshot', vendor: 'armory', name: 'CHEVROTINE', desc: 'Le tir chargé du pistolet lâche 5 projectiles au lieu de 3.', price: 170 },
-  { id: 'wirelong', vendor: 'armory', name: 'FIL HAUTE TENSION', desc: 'Portée du monowire +2 m.', price: 150 },
+  { id: 'wirelong', vendor: 'armory', name: 'FIL HAUTE TENSION', desc: 'Portée du monowire +2,5 m, zone du balayage chargé +2,5 m.', price: 150 },
   { id: DEFAULT_INK, vendor: 'ink', name: 'ENCRE D\'ORIGINE', desc: 'Cyan et magenta, comme au premier jour.', price: 0, ink: [0x00e5ff, 0xff2bd6] },
   { id: 'ink-gold', vendor: 'ink', name: 'ENCRE OR', desc: 'Or chaud et ambre. Discret, comme un lingot.', price: 35, ink: [0xffc83a, 0xff7a1a] },
   { id: 'ink-toxic', vendor: 'ink', name: 'ENCRE TOXIQUE', desc: 'Vert acide et menthe radioactive.', price: 35, ink: [0x9dff5c, 0x2bffb0] },
@@ -54,6 +54,8 @@ export const STATS = {
   chargeCooldown: CHARGED.cooldown as number,
   shotgunPellets: 3,
   wireRange: MONOWIRE.range as number,
+  wireChargeRadius: MONOWIRE.chargeRadius as number,
+  wireChargeCooldown: MONOWIRE.chargeCooldown as number,
 };
 
 /** Récompense de fin de niveau, détaillée pour l'écran d'arrivée. */
@@ -188,7 +190,9 @@ export class Progress {
     STATS.creditBonus = this.has('magnet') ? 1.25 : 1;
     STATS.chargeCooldown = CHARGED.cooldown * (this.has('coolant') ? 0.6 : 1);
     STATS.shotgunPellets = this.has('buckshot') ? 5 : 3;
-    STATS.wireRange = MONOWIRE.range + (this.has('wirelong') ? 2 : 0);
+    STATS.wireRange = MONOWIRE.range + (this.has('wirelong') ? 2.5 : 0);
+    STATS.wireChargeRadius = MONOWIRE.chargeRadius + (this.has('wirelong') ? 2.5 : 0);
+    STATS.wireChargeCooldown = MONOWIRE.chargeCooldown * (this.has('coolant') ? 0.6 : 1);
   }
 
   private load(): void {

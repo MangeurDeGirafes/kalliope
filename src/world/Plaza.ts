@@ -80,6 +80,8 @@ export const PACKAGE_COUNT = 3;
 /** Arrivée de la course de Petit Zéro (toit jaune du marché). */
 export const RACE_FINISH = new THREE.Vector3(23.5, 12, -133);
 export const RACE_START = new THREE.Vector3(6, 0, -72);
+/** Téléporteur de l'entrée : mène directement au niveau suivant. */
+export const TELEPORTER = new THREE.Vector3(-9, 0, 18);
 
 type Rng = () => number;
 
@@ -114,7 +116,8 @@ export function plazaDef(exitLabel: string): LevelDef {
     drones: [],
     holos: [
       { lines: ['BIENVENUE À LA PLAZA', 'MARCHANDS · SECRETS · REPOS'], pos: [0, 3.1, 11], color: 'pink', width: 5.5 },
-      { lines: ['SORTIE ▶', exitLabel], pos: [0, 7.6, -141], color: 'yellow', width: 6.5 },
+      { lines: ['TÉLÉPORTEUR ▶', exitLabel], pos: [0, 7.6, -141], color: 'yellow', width: 6.5 },
+      { lines: ['TÉLÉPORTEUR ▶', exitLabel], pos: [TELEPORTER.x, 4.4, TELEPORTER.z], color: 'cyan', width: 5 },
       { lines: ['RUE DES LANTERNES', 'BOUTIQUES · BAR · TOITS'], pos: [0, 5.8, -72], color: 'orange', width: 5 },
       { lines: ['▲ TREMPLIN ▲'], pos: [17, 3.2, -40.5], color: 'green', width: 3.2 },
     ],
@@ -188,6 +191,9 @@ export class Plaza {
   readonly cats: Cat[] = [];
   /** Colis de Vex (visibles seulement pendant la quête). */
   readonly packages: Pickup[] = [];
+  /** Zones qui envoient au niveau suivant (téléporteur de l'entrée). */
+  readonly teleporters: THREE.Vector3[] = [];
+  private teleporterFx: { rings: THREE.Mesh[]; column: THREE.MeshBasicMaterial } | null = null;
   private readonly npcs: Npc[] = [];
   private raceMarker: THREE.Group | null = null;
   private water: THREE.MeshBasicMaterial | null = null;
@@ -259,6 +265,7 @@ export class Plaza {
     this.crates(b);
     this.tower(b);
     this.market(b, rng);
+    this.teleporter(b);
 
     // Chats néon cachés
     const spots: [number, number, number, number][] = [
@@ -277,6 +284,16 @@ export class Plaza {
 
   update(dt: number, player: THREE.Vector3): void {
     this.time += dt;
+    if (this.teleporterFx) {
+      const fx = this.teleporterFx;
+      fx.rings.forEach((r, i) => {
+        const k = (this.time * 0.45 + i / fx.rings.length) % 1;
+        r.position.y = 0.3 + k * 5.5;
+        r.scale.setScalar(1 - k * 0.35);
+        (r.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - k);
+      });
+      fx.column.opacity = 0.18 + Math.sin(this.time * 3) * 0.05;
+    }
     const t = this.time;
     const k = 1 - Math.exp(-6 * dt);
     for (const n of this.npcs) {
@@ -1001,6 +1018,49 @@ export class Plaza {
     flag.visible = false;
     b.course.add(flag);
     this.raceMarker = flag;
+  }
+
+  /** Téléporteur de l'entrée : socle, colonne de lumière et anneaux qui montent. */
+  private teleporter(b: LevelBuilder): void {
+    const { x, z } = TELEPORTER;
+    this.teleporters.length = 0;
+    this.teleporters.push(TELEPORTER.clone());
+    b.propGeo(new THREE.CylinderGeometry(1.9, 2.1, 0.22, 24), b.matrix(x, 0.11, z), 0x1a1a24);
+    b.propGeo(new THREE.CylinderGeometry(1.5, 1.5, 0.05, 24), b.matrix(x, 0.24, z), 0x2a3a4a);
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      b.glow(0.22, 0.06, 0.22, x + Math.cos(a) * 1.75, 0.25, z + Math.sin(a) * 1.75, i % 2 ? 0x00e5ff : 0xff2bd6, 2.6);
+    }
+    const column = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0x00e5ff).multiplyScalar(1.2),
+      transparent: true,
+      opacity: 0.2,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    b.courseDisposables.push(column);
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(1.45, 1.45, 6, 24, 1, true), column);
+    col.position.set(x, 3.2, z);
+    b.course.add(col);
+    const rings: THREE.Mesh[] = [];
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(i % 2 ? 0xff2bd6 : 0x00e5ff).multiplyScalar(2.2 * LIGHTING.neon),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      });
+      b.courseDisposables.push(m);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.05, 6, 32), m);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(x, 0.3, z);
+      b.course.add(ring);
+      rings.push(ring);
+    }
+    this.teleporterFx = { rings, column };
   }
 
   /** Devanture de boutique adossée à une façade (f = direction de la rue). */

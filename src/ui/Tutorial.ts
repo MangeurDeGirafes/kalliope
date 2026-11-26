@@ -68,7 +68,7 @@ function gamePages(touch: boolean): Page[] {
     ),
     page(
       'COMBAT',
-      'Les lames Mantis tuent en un seul coup. Un laser rouge annonce un tir imminent : tranche le projectile pour le renvoyer à son tireur. Le pistolet se charge des drones : maintiens puis relâche pour une décharge de chevrotine à trois projectiles. Le monowire (armurerie de la Plaza) frappe deux fois plus loin, en deux touches.',
+      'Les lames Mantis tuent en un seul coup. Un laser rouge annonce un tir imminent : tranche le projectile pour le renvoyer à son tireur. Le pistolet se charge des drones : maintiens puis relâche pour une décharge de chevrotine à trois projectiles. Le monowire (armurerie de la Plaza) frappe à 10 m et tue en deux touches ; maintiens puis relâche pour un double balayage qui fauche toute la zone autour de toi.',
       keys(['CLIC GAUCHE', '1 / 2 / 3 : ARME'], ['ATTAQUE', '⇄ : ARME']),
       sceneCombat,
     ),
