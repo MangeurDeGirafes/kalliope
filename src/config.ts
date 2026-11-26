@@ -171,6 +171,26 @@ export const SHOTGUN = {
   recoil: 0.11,
 } as const;
 
+/** Bras gorille : coups de poing (renvoient les tirs), séisme au sol ou frappe météore. */
+export const GORILLA = {
+  range: 2.9,
+  coneDeg: 50,
+  cooldown: 0.3,
+  punchDuration: 0.28,
+  activeStart: 0.3,
+  activeEnd: 0.6,
+  pushForward: 5,
+  chargeHold: 0.5,
+  chargeShowAfter: 0.12,
+  /** Rayon du séisme au sol (m) et vitesse du super-saut qu'il déclenche. */
+  slamRadius: 7,
+  slamLaunch: 11.5,
+  /** Frappe météore (relâchée en l'air) : piqué puis onde plus large à l'impact. */
+  diveSpeed: 38,
+  meteorRadius: 9,
+  chargeCooldown: 3.5,
+} as const;
+
 /** Monowire : fouet monofilament, portée supérieure aux lames, deux touches pour tuer. */
 export const MONOWIRE = {
   range: 10,

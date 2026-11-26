@@ -10,6 +10,7 @@ import {
   sceneLore,
   sceneObjective,
   scenePlaza,
+  sceneBonus,
   sceneSandevistan,
   sceneSlide,
   sceneSurvival,
@@ -68,8 +69,8 @@ function gamePages(touch: boolean): Page[] {
     ),
     page(
       'COMBAT',
-      'Les lames Mantis tuent en un seul coup. Un laser rouge annonce un tir imminent : tranche le projectile pour le renvoyer à son tireur. Le pistolet se charge des drones : maintiens puis relâche pour une décharge de chevrotine à trois projectiles. Le monowire (armurerie de la Plaza) frappe à 10 m et tue en deux touches ; maintiens puis relâche pour un double balayage qui fauche toute la zone autour de toi.',
-      keys(['CLIC GAUCHE', '1 / 2 / 3 : ARME'], ['ATTAQUE', '⇄ : ARME']),
+      'Les lames Mantis tuent en un seul coup. Un laser rouge annonce un tir imminent : tranche le projectile pour le renvoyer à son tireur. Le pistolet se charge des drones : maintiens puis relâche pour une décharge de chevrotine à trois projectiles. Le monowire (armurerie de la Plaza) frappe à 10 m et tue en deux touches ; maintiens puis relâche pour un double balayage qui fauche toute la zone autour de toi. Les bras gorille cognent et renvoient les tirs ; chargés, ils provoquent un séisme (et un super-saut), ou une frappe météore en l\'air.',
+      keys(['CLIC GAUCHE', '1 / 2 / 3 / 4 : ARME'], ['ATTAQUE', '⇄ : ARME']),
       sceneCombat,
     ),
     page(
@@ -83,6 +84,12 @@ function gamePages(touch: boolean): Page[] {
       'Ralentis le temps : le monde se fige presque, pas toi. La jauge se vide vite puis se recharge, et chaque élimination la remplit un peu.',
       keys(['CLIC DROIT'], ['⧗ (EN HAUT À DROITE)']),
       sceneSandevistan,
+    ),
+    page(
+      'BONUS ET STYLE',
+      'Ramasse les bonus des toits : OVERDRIVE (vitesse et dashs illimités), BOUCLIER (encaisse un tir), SURCHARGE (attaques chargées instantanées), CHRONO (Sandevistan plein, −3 s). Enchaîne les éliminations pour faire grimper le combo et la lettre de style : ton rang final (S à D) et ta médaille de temps en dépendent.',
+      [],
+      sceneBonus,
     ),
     page(
       'LA PLAZA',

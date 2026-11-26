@@ -12,14 +12,15 @@ import { BladeTrail } from '../effects/BladeTrail';
 import { createRadialTexture } from '../effects/ParticleSystem';
 import { MantisArm, armPose, createArmPose, lerpArmPose, mirrorArmPose } from './MantisBladeModel';
 import type { ArmPose } from './MantisBladeModel';
-import { BLADES, CHARGED, LIGHTING, MONOWIRE, PISTOL, SHOTGUN, TOUCH } from '../config';
+import { BLADES, CHARGED, GORILLA, LIGHTING, MONOWIRE, PISTOL, SHOTGUN, TOUCH } from '../config';
 import { STATS } from '../progress/Progress';
 import { vibrate } from '../core/Device';
 
-export type WeaponId = 'blades' | 'pistol' | 'monowire';
+export type WeaponId = 'blades' | 'pistol' | 'monowire' | 'gorilla';
 
-/** Ordre des armes (touches 1, 2, 3 et molette). */
-export const WEAPON_ORDER: readonly WeaponId[] = ['blades', 'pistol', 'monowire'];
+/** Ordre des armes (touches 1 à 4 et molette). */
+export const WEAPON_ORDER: readonly WeaponId[] = ['blades', 'pistol', 'monowire', 'gorilla'];
+const AMBER = new THREE.Color(0xffa040);
 
 /** Segments du fil du monowire (instances). */
 const WIRE_SEGMENTS = 28;
@@ -80,8 +81,10 @@ export class WeaponManager {
   onChargedStrike: (() => void) | null = null;
   /** Appelé à chaque projectile tiré (cibles secrètes à abattre). */
   onShot: ((origin: THREE.Vector3, dir: THREE.Vector3, distance: number) => void) | null = null;
-  /** Armes disponibles (le monowire s'achète à l'armurerie de la Plaza). */
+  /** Armes disponibles (monowire et bras gorille s'achètent à l'armurerie de la Plaza). */
   readonly unlocked = new Set<WeaponId>(['blades', 'pistol']);
+  /** Bonus SURCHARGE : charges trois fois plus rapides, aucune recharge. */
+  surge = false;
 
   private readonly engine: Engine;
   private readonly physics: Physics;
@@ -133,6 +136,23 @@ export class WeaponManager {
   private readonly shockRing: THREE.Mesh;
   private readonly shockMat: THREE.MeshBasicMaterial;
   private shockTime = -1;
+  private shockRadius = 1;
+
+  // Bras gorille
+  private readonly gorillaGroup = new THREE.Group();
+  private readonly fists: THREE.Group[] = [];
+  private readonly fistGlow: THREE.MeshBasicMaterial;
+  private punchTime = -1;
+  private punchArm = 0;
+  private punchHit = false;
+  private punchCooldown = 0;
+  private punchBuffer = 0;
+  private gorillaHold = -1;
+  private gorillaReadyPlayed = false;
+  private gorillaCooldown = 0;
+  /** Frappe météore en cours : piqué jusqu'à l'impact au sol. */
+  private meteor = false;
+  private meteorTime = 0;
 
   // État
   private switchTimer = 0;
@@ -196,6 +216,7 @@ export class WeaponManager {
     this.buildBlades();
     this.pistolCoreMat = this.buildPistol();
     this.wire = this.buildMonowire();
+    this.fistGlow = this.buildGorilla();
     // Onde de choc au sol du double balayage
     this.shockMat = new THREE.MeshBasicMaterial({
       color: ORANGE.clone().multiplyScalar(2.5 * LIGHTING.effects),
@@ -269,6 +290,12 @@ export class WeaponManager {
     this.wireChargeCooldown = 0;
     this.shockTime = -1;
     this.shockRing.visible = false;
+    this.punchTime = -1;
+    this.punchCooldown = 0;
+    this.gorillaHold = -1;
+    this.gorillaCooldown = 0;
+    this.meteor = false;
+    this.surge = false;
     if (!this.unlocked.has(this.current)) {
       this.current = 'blades';
       this.applyVisibility();
@@ -283,6 +310,7 @@ export class WeaponManager {
   get chargeLevel(): number {
     if (this.current === 'pistol') return this.pistolHold < 0 ? 0 : Math.min(1, this.pistolHold / SHOTGUN.holdTime);
     if (this.current === 'monowire') return this.wireHold < 0 ? 0 : Math.min(1, this.wireHold / MONOWIRE.chargeHold);
+    if (this.current === 'gorilla') return this.gorillaHold < 0 ? 0 : Math.min(1, this.gorillaHold / GORILLA.chargeHold);
     return this.chargeHold < 0 ? 0 : Math.min(1, this.chargeHold / CHARGED.holdTime);
   }
 
@@ -290,6 +318,7 @@ export class WeaponManager {
   get chargeVisible(): boolean {
     if (this.current === 'pistol') return this.pistolHold >= SHOTGUN.showAfter;
     if (this.current === 'monowire') return this.wireHold >= MONOWIRE.chargeShowAfter;
+    if (this.current === 'gorilla') return this.gorillaHold >= GORILLA.chargeShowAfter;
     return this.chargeHold >= CHARGED.showAfter && this.current === 'blades';
   }
 
@@ -298,6 +327,7 @@ export class WeaponManager {
     if (this.current === 'blades' && this.chargeCooldown > 0) return 1 - this.chargeCooldown / STATS.chargeCooldown;
     if (this.current === 'pistol' && this.shotgunCooldown > 0) return 1 - this.shotgunCooldown / SHOTGUN.cooldown;
     if (this.current === 'monowire' && this.wireChargeCooldown > 0) return 1 - this.wireChargeCooldown / STATS.wireChargeCooldown;
+    if (this.current === 'gorilla' && this.gorillaCooldown > 0) return 1 - this.gorillaCooldown / STATS.gorillaCooldown;
     return -1;
   }
 
@@ -311,7 +341,12 @@ export class WeaponManager {
 
   /** Attaque chargée en cours (dash des lames ou double balayage du monowire). */
   get isChargeStriking(): boolean {
-    return this.chargeStriking || this.spinTime >= 0;
+    return this.chargeStriking || this.spinTime >= 0 || this.meteor;
+  }
+
+  /** Multiplicateur de vitesse de charge (bonus SURCHARGE). */
+  private get holdRate(): number {
+    return this.surge ? 3 : 1;
   }
 
   get isSwitching(): boolean {
@@ -326,11 +361,20 @@ export class WeaponManager {
     this.chargeCooldown = Math.max(0, this.chargeCooldown - realDt);
     this.shotgunCooldown = Math.max(0, this.shotgunCooldown - realDt);
     this.wireChargeCooldown = Math.max(0, this.wireChargeCooldown - realDt);
+    this.gorillaCooldown = Math.max(0, this.gorillaCooldown - realDt);
+    this.punchCooldown = Math.max(0, this.punchCooldown - dt);
+    if (this.surge) {
+      this.chargeCooldown = 0;
+      this.shotgunCooldown = 0;
+      this.wireChargeCooldown = 0;
+      this.gorillaCooldown = 0;
+    }
 
     if (controlsEnabled && this.player.alive) {
       if (input.wasPressed('weapon1')) this.requestSwitch('blades');
       if (input.wasPressed('weapon2')) this.requestSwitch('pistol');
       if (input.wasPressed('weapon3')) this.requestSwitch('monowire');
+      if (input.wasPressed('weapon4')) this.requestSwitch('gorilla');
       if (input.wasPressed('cycleWeapon')) this.cycleWeapon(1);
       const wheel = input.consumeWheel();
       if (wheel !== 0) this.cycleWeapon(wheel > 0 ? 1 : -1);
@@ -338,7 +382,8 @@ export class WeaponManager {
       if (this.switchTimer <= 0) {
         if (this.current === 'blades') this.updateBladeInput(input, realDt);
         else if (this.current === 'pistol') this.updatePistolInput(input, realDt);
-        else this.updateWireInput(input, realDt);
+        else if (this.current === 'monowire') this.updateWireInput(input, realDt);
+        else this.updateGorillaInput(input, realDt);
       }
     } else {
       input.consumeWheel();
@@ -347,6 +392,8 @@ export class WeaponManager {
     if (this.current !== 'blades' || this.switchTimer > 0) this.cancelCharge();
     if (this.current !== 'pistol' || this.switchTimer > 0 || !controlsEnabled) this.pistolHold = -1;
     if (this.current !== 'monowire' || this.switchTimer > 0 || !controlsEnabled) this.wireHold = -1;
+    if (this.current !== 'gorilla' || this.switchTimer > 0 || !controlsEnabled) this.gorillaHold = -1;
+    this.updateMeteor(dt);
     this.updateShock(realDt);
     this.audio.setCharge(this.chargeVisible ? this.chargeLevel : 0);
     this.updateChargedStrike();
@@ -357,6 +404,7 @@ export class WeaponManager {
     this.updateBlades(dt);
     this.updatePistol(dt);
     this.updateMonowire(dt);
+    this.updateGorilla(dt);
     this.updateShots(realDt);
   }
 
@@ -375,7 +423,7 @@ export class WeaponManager {
   private requestSwitch(id: WeaponId): void {
     if (!this.unlocked.has(id)) return;
     if (id === this.current && this.switchTimer <= 0) return;
-    if (this.chargeStriking || this.spinTime >= 0) return;
+    if (this.chargeStriking || this.spinTime >= 0 || this.meteor) return;
     if (this.pendingWeapon === id) return;
     this.pendingWeapon = id;
     this.switchTimer = SWITCH_TIME;
@@ -404,6 +452,7 @@ export class WeaponManager {
     this.bladesGroup.visible = this.current === 'blades';
     this.pistolGroup.visible = this.current === 'pistol';
     this.monowireGroup.visible = this.current === 'monowire';
+    this.gorillaGroup.visible = this.current === 'gorilla';
     if (this.wire) this.wire.visible = this.current === 'monowire';
   }
 
@@ -475,7 +524,7 @@ export class WeaponManager {
     if (this.chargeHold < 0) return;
     if (input.isMouseDown(MouseButton.Left)) {
       // Temps réel : la durée de charge est la même pendant le Sandevistan
-      this.chargeHold += realDt;
+      this.chargeHold += realDt * this.holdRate;
       if (this.chargeHold >= CHARGED.holdTime && !this.chargeReadyPlayed) {
         this.chargeReadyPlayed = true;
         this.audio.playChargeReady();
@@ -535,9 +584,9 @@ export class WeaponManager {
     const forward = this.player.getLookDirection(this.tmp2);
     const target = this.chargeTarget;
     this.chargeTarget = null;
-    if (target && target.alive && eye.distanceTo(target.center) < CHARGED.arriveDistance + 2) this.enemies.kill(target, forward);
+    if (target && target.alive && eye.distanceTo(target.center) < CHARGED.arriveDistance + 2) this.enemies.kill(target, forward, 'charged');
     // Frappe circulaire : tout ce qui est autour est tranché, les projectiles renvoyés
-    this.enemies.meleeSweep(eye, forward, CHARGED.sweepRange, -1);
+    this.enemies.meleeSweep(eye, forward, CHARGED.sweepRange, -1, Infinity, undefined, 'charged');
     this.enemies.deflectProjectiles(eye, forward, CHARGED.sweepRange, -1);
     this.beginSlashAnimation();
     this.particles.burst(eye.clone().addScaledVector(forward, 1.2), {
@@ -698,7 +747,7 @@ export class WeaponManager {
     }
     if (this.pistolHold < 0) return;
     if (input.isMouseDown(MouseButton.Left)) {
-      this.pistolHold += realDt;
+      this.pistolHold += realDt * this.holdRate;
       if (this.pistolHold >= SHOTGUN.holdTime && !this.pistolReadyPlayed) {
         this.pistolReadyPlayed = true;
         this.audio.playChargeReady();
@@ -720,7 +769,8 @@ export class WeaponManager {
     let end: THREE.Vector3;
     if (enemyHit) {
       end = enemyHit.point;
-      this.enemies.kill(enemyHit.enemy, dir);
+      if (enemyHit.enemy) this.enemies.kill(enemyHit.enemy, dir, 'shot');
+      else enemyHit.target?.hit(1, dir, 'shot');
     } else if (worldHit) {
       end = worldHit.point;
       this.particles.sparks(worldHit.point, worldHit.normal, 0xff40e0, 14);
@@ -931,7 +981,7 @@ export class WeaponManager {
     }
     if (this.wireHold < 0) return;
     if (input.isMouseDown(MouseButton.Left)) {
-      this.wireHold += realDt;
+      this.wireHold += realDt * this.holdRate;
       if (this.wireHold >= MONOWIRE.chargeHold && !this.wireReadyPlayed) {
         this.wireReadyPlayed = true;
         this.audio.playChargeReady();
@@ -961,14 +1011,12 @@ export class WeaponManager {
     const forward = this.player.getLookDirection(this.tmp);
     const radius = STATS.wireChargeRadius;
     const hits = { count: 0 };
-    this.enemies.meleeSweep(eye, forward, radius, -1, MONOWIRE.damage, hits);
+    this.enemies.meleeSweep(eye, forward, radius, -1, MONOWIRE.damage, hits, 'wire');
     this.enemies.deflectProjectiles(eye, forward, radius * 0.6, -1);
     this.audio.playWhip();
     // Onde de choc au sol et étincelles sur le cercle balayé
     const p = this.player.position;
-    this.shockTime = 0;
-    this.shockRing.position.set(p.x, this.player.feetY + 0.12, p.z);
-    this.shockRing.visible = true;
+    this.startShock(radius, ORANGE);
     for (let k = 0; k < 14; k++) {
       const a = (k / 14) * Math.PI * 2;
       const dir = this.tmp2.set(Math.cos(a), 0, Math.sin(a));
@@ -983,11 +1031,20 @@ export class WeaponManager {
     }
   }
 
+  /** Onde de choc au sol autour du joueur (balayage, séisme). */
+  private startShock(radius: number, color: THREE.Color): void {
+    this.shockTime = 0;
+    this.shockRadius = radius;
+    this.shockMat.color.copy(color).multiplyScalar(2.5 * LIGHTING.effects);
+    this.shockRing.position.set(this.player.position.x, this.player.feetY + 0.12, this.player.position.z);
+    this.shockRing.visible = true;
+  }
+
   private updateShock(realDt: number): void {
     if (this.shockTime < 0) return;
     this.shockTime += realDt;
     const k = Math.min(1, this.shockTime / 0.35);
-    const r = 1 + (STATS.wireChargeRadius - 1) * easeOutCubic(k);
+    const r = 1 + (this.shockRadius - 1) * easeOutCubic(k);
     this.shockRing.scale.set(r, r, r);
     this.shockMat.opacity = 0.85 * (1 - k);
     if (k >= 1) {
@@ -1020,7 +1077,7 @@ export class WeaponManager {
         const forward = this.player.getLookDirection(this.tmp);
         const hits = { count: 0 };
         const cos = Math.cos(THREE.MathUtils.degToRad(MONOWIRE.coneDeg));
-        this.enemies.meleeSweep(eye, forward, this.whipReach + 0.4, cos, MONOWIRE.damage, hits);
+        this.enemies.meleeSweep(eye, forward, this.whipReach + 0.4, cos, MONOWIRE.damage, hits, 'wire');
         if (hits.count > 0) vibrate(25);
         if (this.whipReach < STATS.wireRange - 0.05) {
           const tip = this.tmp2.copy(eye).addScaledVector(forward, this.whipReach);
@@ -1182,6 +1239,205 @@ export class WeaponManager {
     wire.frustumCulled = false;
     this.root.add(wire);
     return wire;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bras gorille
+  // ---------------------------------------------------------------------------
+
+  /** Clic = coup de poing ; maintien puis relâche = séisme (au sol) ou frappe météore (en l'air). */
+  private updateGorillaInput(input: InputManager, realDt: number): void {
+    this.punchBuffer = Math.max(0, this.punchBuffer - realDt);
+    if (input.wasMousePressed(MouseButton.Left)) {
+      this.punchBuffer = 0.25;
+      this.gorillaHold = this.gorillaCooldown > 0 || this.meteor ? -1 : 0;
+      this.gorillaReadyPlayed = false;
+    }
+    if (this.punchBuffer > 0 && this.punchCooldown <= 0 && this.punchTime < 0 && !this.meteor) {
+      this.punchBuffer = 0;
+      this.startPunch();
+    }
+    if (this.gorillaHold < 0) return;
+    if (input.isMouseDown(MouseButton.Left)) {
+      this.gorillaHold += realDt * this.holdRate;
+      if (this.gorillaHold >= GORILLA.chargeHold && !this.gorillaReadyPlayed) {
+        this.gorillaReadyPlayed = true;
+        this.audio.playChargeReady();
+        vibrate(30);
+      }
+    } else {
+      const ready = this.gorillaHold >= GORILLA.chargeHold;
+      this.gorillaHold = -1;
+      if (ready) this.startSlam();
+    }
+  }
+
+  private startPunch(): void {
+    this.punchTime = 0;
+    this.punchArm = 1 - this.punchArm;
+    this.punchHit = false;
+    this.punchCooldown = GORILLA.cooldown;
+    this.player.pushForward(GORILLA.pushForward);
+    this.audio.playPunch();
+  }
+
+  private startSlam(): void {
+    this.gorillaCooldown = STATS.gorillaCooldown;
+    this.audio.playChargedStrike();
+    vibrate(40);
+    if (this.player.grounded) {
+      this.groundSlam(GORILLA.slamRadius, true);
+    } else {
+      this.meteor = true;
+      this.meteorTime = 0;
+      this.player.dive(GORILLA.diveSpeed);
+    }
+  }
+
+  private updateMeteor(dt: number): void {
+    if (!this.meteor) return;
+    this.meteorTime += dt;
+    if (!this.player.alive || this.meteorTime > 4) {
+      this.meteor = false;
+      return;
+    }
+    // Traînée de feu pendant le piqué
+    this.particles.burst(this.player.position, {
+      count: 4,
+      color: 0xffa040,
+      color2: 0xff3b3b,
+      intensity: 3,
+      speedMin: 0.5,
+      speedMax: 2,
+      lifeMin: 0.15,
+      lifeMax: 0.35,
+      sizeMin: 0.05,
+      sizeMax: 0.12,
+      gravity: -4,
+      drag: 3,
+    });
+    if (this.player.grounded) {
+      this.meteor = false;
+      this.groundSlam(GORILLA.meteorRadius, false);
+    }
+  }
+
+  /** Onde de choc autour du joueur : tout ce qui est dans le rayon est pulvérisé. */
+  private groundSlam(radius: number, launch: boolean): void {
+    const eye = this.engine.camera.position;
+    const forward = this.player.getLookDirection(this.tmp);
+    const hits = { count: 0 };
+    this.enemies.meleeSweep(eye, forward, radius, -1, Infinity, hits, 'slam');
+    this.enemies.deflectProjectiles(eye, forward, radius * 0.6, -1);
+    this.startShock(radius, AMBER);
+    const p = this.player.position;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      const dir = this.tmp2.set(Math.cos(a), 0.4, Math.sin(a)).normalize();
+      this.particles.sparks(new THREE.Vector3(p.x + Math.cos(a) * radius * 0.5, this.player.feetY + 0.3, p.z + Math.sin(a) * radius * 0.5), dir, 0xffa040, 6);
+    }
+    this.audio.playSlam();
+    vibrate(70);
+    this.player.addShake(0.7);
+    if (hits.count > 0) this.onChargedStrike?.();
+    if (launch) {
+      // Super-saut : le séisme propulse le joueur
+      const f = this.tmp2.set(forward.x, 0, forward.z).normalize().multiplyScalar(4);
+      this.player.launch(GORILLA.slamLaunch, f);
+    }
+  }
+
+  private updateGorilla(dt: number): void {
+    let u = -1;
+    if (this.punchTime >= 0) {
+      this.punchTime += dt;
+      u = Math.min(1, this.punchTime / GORILLA.punchDuration);
+      if (u >= GORILLA.activeStart && !this.punchHit) {
+        this.punchHit = true;
+        const eye = this.engine.camera.position;
+        const forward = this.player.getLookDirection(this.tmp);
+        const hits = { count: 0 };
+        this.enemies.meleeSweep(eye, forward, GORILLA.range, Math.cos(THREE.MathUtils.degToRad(GORILLA.coneDeg)), Infinity, hits, 'melee');
+        // Parade : un coup de poing renvoie les tirs proches
+        this.enemies.deflectProjectiles(eye, forward, 3.4, Math.cos(THREE.MathUtils.degToRad(70)));
+        if (hits.count > 0) {
+          this.audio.playBladeHit();
+          this.player.addShake(0.25);
+          vibrate(25);
+        }
+      }
+      if (u >= 1) {
+        this.punchTime = -1;
+        u = -1;
+      }
+    }
+    if (this.current !== 'gorilla') return;
+    const charge = this.chargeVisible ? this.chargeLevel : 0;
+    const glow = 1 + charge * 2 + (this.meteor ? 2 : 0) + Math.sin(this.time * 4) * 0.2;
+    this.fistGlow.color.copy(AMBER).multiplyScalar(3 * LIGHTING.weaponGlow * glow * 0.5);
+    for (let i = 0; i < 2; i++) {
+      const fist = this.fists[i];
+      const side = i === 0 ? 1 : -1;
+      let x = side * 0.24;
+      let y = -0.29 + Math.sin(this.time * 2 + i) * 0.006;
+      let z = -0.42;
+      let rx = 0.1;
+      if (u >= 0 && i === this.punchArm) {
+        // Direct : le poing part vers le centre puis revient
+        const k = u < 0.45 ? easeOutCubic(u / 0.45) : 1 - easeInOutCubic((u - 0.45) / 0.55);
+        x -= side * 0.14 * k;
+        y += 0.06 * k;
+        z -= 0.38 * k;
+        rx -= 0.25 * k;
+      } else if (this.meteor) {
+        y += 0.18;
+        z -= 0.05;
+        rx = -0.6;
+      } else if (charge > 0) {
+        // Armé : poings ramenés et tremblants
+        z += 0.12 * charge;
+        y -= 0.04 * charge;
+        x += side * 0.04 * charge;
+        if (charge >= 1) {
+          x += (Math.random() - 0.5) * 0.008;
+          y += (Math.random() - 0.5) * 0.008;
+        }
+      }
+      fist.position.set(x, y, z);
+      fist.rotation.set(rx, -side * 0.12, side * 0.08);
+    }
+  }
+
+  private buildGorilla(): THREE.MeshBasicMaterial {
+    const armor = new THREE.MeshStandardMaterial({ color: 0x1c1e26, metalness: 0.85, roughness: 0.3 });
+    const plate = new THREE.MeshStandardMaterial({ color: 0x3a3f4e, metalness: 0.9, roughness: 0.25 });
+    const chrome = new THREE.MeshStandardMaterial({ color: 0xb8c2d8, metalness: 1, roughness: 0.15 });
+    const glow = new THREE.MeshBasicMaterial({ color: AMBER.clone().multiplyScalar(3 * LIGHTING.weaponGlow), toneMapped: false });
+    for (const side of [1, -1]) {
+      const g = new THREE.Group();
+      const forearm = this.meshAt(new THREE.BoxGeometry(0.14, 0.14, 0.44), armor, 0, -0.03, 0.22);
+      forearm.rotation.x = 0.28;
+      g.add(forearm);
+      const top = this.meshAt(new THREE.BoxGeometry(0.16, 0.05, 0.3), plate, 0, 0.06, 0.16);
+      top.rotation.x = 0.28;
+      g.add(top);
+      g.add(this.meshAt(new THREE.BoxGeometry(0.18, 0.15, 0.16), armor, 0, 0, -0.06));
+      g.add(this.meshAt(new THREE.BoxGeometry(0.19, 0.06, 0.12), plate, 0, 0.065, -0.07));
+      for (let k = 0; k < 4; k++) g.add(this.meshAt(new THREE.BoxGeometry(0.034, 0.02, 0.05), glow, -0.06 + k * 0.04, 0.09, -0.11));
+      g.add(this.meshAt(new THREE.BoxGeometry(0.15, 0.012, 0.012), glow, 0, 0.1, -0.01));
+      const piston = this.meshAt(new THREE.CylinderGeometry(0.018, 0.018, 0.26, 8), chrome, side * 0.08, -0.06, 0.14);
+      piston.rotation.x = Math.PI / 2 + 0.28;
+      g.add(piston);
+      const strip = this.meshAt(new THREE.BoxGeometry(0.006, 0.006, 0.32), glow, side * 0.074, 0.02, 0.2);
+      strip.rotation.x = 0.28;
+      g.add(strip);
+      g.position.set(side * 0.24, -0.29, -0.42);
+      g.scale.setScalar(0.85);
+      this.gorillaGroup.add(g);
+      this.fists.push(g);
+    }
+    this.sway.add(this.gorillaGroup);
+    return glow;
   }
 
   // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { BLADES, CHARGED, DASH, MONOWIRE, MOVEMENT, PLAYER, SANDEVISTAN } from '../config';
+import { BLADES, CHARGED, DASH, GORILLA, MONOWIRE, MOVEMENT, PLAYER, SANDEVISTAN } from '../config';
 
 /** Marchand qui vend une amélioration. */
 export type VendorId = 'clinic' | 'atelier' | 'armory' | 'ink';
@@ -27,8 +27,9 @@ export const UPGRADES: readonly UpgradeDef[] = [
   { id: 'blades', vendor: 'atelier', name: 'LAMES ALLONGÉES', desc: 'Portée des lames +25 % et fente plus longue.', price: 150 },
   { id: 'airjump', vendor: 'atelier', name: 'RESSORTS DE MOLLETS', desc: 'Un saut en l\'air de plus : triple saut.', price: 320 },
   { id: 'magnet', vendor: 'atelier', name: 'PUCE DE NÉGOCE', desc: 'Crédits gagnés en fin de niveau +25 %.', price: 180 },
-  { id: 'coolant', vendor: 'clinic', name: 'REFROIDISSEUR', desc: 'Les attaques chargées (lames, monowire) se rechargent 40 % plus vite.', price: 150 },
+  { id: 'coolant', vendor: 'clinic', name: 'REFROIDISSEUR', desc: 'Les attaques chargées (lames, monowire, bras gorille) se rechargent 40 % plus vite.', price: 150 },
   { id: 'monowire', vendor: 'armory', name: 'MONOWIRE', desc: 'Fouet monofilament : portée 10 m, deux touches pour tuer. Maintenir puis relâcher : double balayage de zone. Touche 3.', price: 240 },
+  { id: 'gorilla', vendor: 'armory', name: 'BRAS GORILLE', desc: 'Coups de poing qui renvoient les tirs. Maintenir : séisme au sol + super-saut, ou frappe météore en l\'air. Touche 4.', price: 280 },
   { id: 'buckshot', vendor: 'armory', name: 'CHEVROTINE', desc: 'Le tir chargé du pistolet lâche 5 projectiles au lieu de 3.', price: 170 },
   { id: 'wirelong', vendor: 'armory', name: 'FIL HAUTE TENSION', desc: 'Portée du monowire +2,5 m, zone du balayage chargé +2,5 m.', price: 150 },
   { id: DEFAULT_INK, vendor: 'ink', name: 'ENCRE D\'ORIGINE', desc: 'Cyan et magenta, comme au premier jour.', price: 0, ink: [0x00e5ff, 0xff2bd6] },
@@ -56,6 +57,7 @@ export const STATS = {
   wireRange: MONOWIRE.range as number,
   wireChargeRadius: MONOWIRE.chargeRadius as number,
   wireChargeCooldown: MONOWIRE.chargeCooldown as number,
+  gorillaCooldown: GORILLA.chargeCooldown as number,
 };
 
 /** Récompense de fin de niveau, détaillée pour l'écran d'arrivée. */
@@ -193,6 +195,7 @@ export class Progress {
     STATS.wireRange = MONOWIRE.range + (this.has('wirelong') ? 2.5 : 0);
     STATS.wireChargeRadius = MONOWIRE.chargeRadius + (this.has('wirelong') ? 2.5 : 0);
     STATS.wireChargeCooldown = MONOWIRE.chargeCooldown * (this.has('coolant') ? 0.6 : 1);
+    STATS.gorillaCooldown = GORILLA.chargeCooldown * (this.has('coolant') ? 0.6 : 1);
   }
 
   private load(): void {

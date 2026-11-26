@@ -18,6 +18,8 @@ export interface PlayerListener {
   onSandevistan?(active: boolean): void;
   onHurt?(): void;
   onDeath?(): void;
+  /** Le bouclier (bonus) a absorbé un tir. */
+  onShield?: () => void;
 }
 
 /**
@@ -28,6 +30,12 @@ export interface PlayerListener {
 export class PlayerController {
   readonly camera: THREE.PerspectiveCamera;
   listener: PlayerListener | null = null;
+  /** Bonus OVERDRIVE : multiplicateur de vitesse de course et en l'air. */
+  speedBoost = 1;
+  /** Bonus OVERDRIVE : les dashs ne consomment pas de charge. */
+  freeDash = false;
+  /** Bonus BOUCLIER : tirs absorbés restants. */
+  shield = 0;
 
   /** Centre de la capsule. */
   readonly position = new THREE.Vector3();
@@ -208,6 +216,9 @@ export class PlayerController {
     this.recoil = 0;
     this.trauma = 0;
     this.fovKick = 0;
+    this.speedBoost = 1;
+    this.freeDash = false;
+    this.shield = 0;
     this.audio.setSlowMotion(false);
     this.audio.stopLoops();
     this.updateCamera(0, 0, 0);
@@ -335,9 +346,28 @@ export class PlayerController {
     this.dashCharges = Math.min(STATS.dashMax, this.dashCharges + 1);
   }
 
+  /** Piqué vertical (frappe météore des bras gorille). */
+  dive(speed: number): void {
+    if (!this.alive) return;
+    this.dashing = false;
+    this.lungeTimer = 0;
+    if (this.wallRunning) this.endWallRun(false);
+    this.velocity.x *= 0.3;
+    this.velocity.z *= 0.3;
+    this.velocity.y = -speed;
+  }
+
   /** Inflige des dégâts. Renvoie true si le coup a été encaissé. */
   damage(amount: number): boolean {
     if (!this.alive || this.invulnerable > 0) return false;
+    if (this.shield > 0) {
+      // Le bouclier encaisse à la place de l'intégrité
+      this.shield--;
+      this.invulnerable = 0.8;
+      this.addShake(0.3);
+      this.listener?.onShield?.();
+      return false;
+    }
     this.health -= amount;
     this.invulnerable = PLAYER.hurtInvulnerability;
     this.regenTimer = 0;
@@ -523,7 +553,7 @@ export class PlayerController {
       return;
     }
 
-    const maxSpeed = (this.crouched ? SLIDE.crouchSpeed : MOVEMENT.runSpeed) * this.moveScale;
+    const maxSpeed = (this.crouched ? SLIDE.crouchSpeed : MOVEMENT.runSpeed * this.speedBoost) * this.moveScale;
     const rate = hasWish ? MOVEMENT.groundAccel : MOVEMENT.groundFriction;
     const k = 1 - Math.exp(-rate * dt);
     const tx = this.wish.x * maxSpeed;
@@ -537,9 +567,10 @@ export class PlayerController {
       // Contrôle aérien façon Quake : on n'ajoute de la vitesse que si elle est
       // inférieure à la vitesse cible dans la direction voulue (conservation de l'élan).
       const current = this.velocity.x * this.wish.x + this.velocity.z * this.wish.z;
-      const add = MOVEMENT.airSpeed - current;
+      const airSpeed = MOVEMENT.airSpeed * this.speedBoost;
+      const add = airSpeed - current;
       if (add > 0) {
-        const accel = Math.min(MOVEMENT.airAccel * MOVEMENT.airSpeed * dt, add);
+        const accel = Math.min(MOVEMENT.airAccel * airSpeed * dt, add);
         this.velocity.x += this.wish.x * accel;
         this.velocity.z += this.wish.z * accel;
       }
@@ -681,7 +712,7 @@ export class PlayerController {
     else this.dashDir.copy(this.forward);
     this.dashing = true;
     this.dashTimer = DASH.duration;
-    this.dashCharges--;
+    if (!this.freeDash) this.dashCharges--;
     if (this.wallRunning) this.endWallRun(false);
     this.sliding = false;
     this.fovKick = DASH.fovKick;

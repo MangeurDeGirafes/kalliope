@@ -723,3 +723,45 @@ export const scenePlaza: Scene = (ctx, t) => {
   text(ctx, `${tt < 1.5 ? 212 : tt < 4.0 ? 52 : 82} ¢`, 4, 4, C.yellow);
   rain(ctx, t, 0.5);
 };
+
+/** Bonus et style : un bonus ramassé, deux éliminations enchaînées, la lettre monte. */
+export const sceneBonus: Scene = (ctx, t) => {
+  const period = 6;
+  const tt = t % period;
+  sky(ctx);
+  skyline(ctx, 30);
+  roof(ctx, 0, 70, 160, C.cyan);
+  const took = tt > 1.2;
+  if (!took) {
+    const bob = Math.sin(t * 5) * 1.5;
+    px(ctx, 44, 56 + bob, 6, 6, C.cyan);
+    px(ctx, 45, 57 + bob, 4, 4, '#05101a');
+    px(ctx, 46, 58 + bob, 2, 2, C.cyan);
+  }
+  const g1 = tt < 2.6;
+  const g2 = tt < 3.7;
+  if (g1) guard(ctx, 92, 70, t);
+  if (g2) guard(ctx, 128, 70, t);
+  let x: number;
+  let pose: Pose = 'run';
+  if (tt < 1.2) x = 6 + (tt / 1.2) * 40;
+  else if (tt < 2.6) x = 46 + ((tt - 1.2) / 1.4) * 40;
+  else if (tt < 3.7) x = 86 + ((tt - 2.6) / 1.1) * 36;
+  else {
+    x = 122;
+    pose = 'stand';
+  }
+  if ((tt > 2.4 && tt < 2.7) || (tt > 3.5 && tt < 3.8)) pose = 'slash';
+  // Traînées de vitesse pendant l'OVERDRIVE
+  if (took && tt < 3.8) for (let i = 0; i < 4; i++) px(ctx, x - 14 - i * 5, 60 + i * 3, 6, 1, C.cyan);
+  runner(ctx, x, 70, pose, t);
+  if (tt > 1.2 && tt < 2.2) text(ctx, 'OVERDRIVE', 30, 40 - (tt - 1.2) * 6, C.cyan);
+  if (tt > 2.6 && tt < 3.4) burst(ctx, 92, 60, (tt - 2.6) / 0.8, [C.red, C.white, C.magenta]);
+  if (tt > 3.7 && tt < 4.5) burst(ctx, 128, 60, (tt - 3.7) / 0.8, [C.red, C.white, C.magenta]);
+  // Jauge de style
+  const rank = tt < 2.6 ? 'D' : tt < 3.7 ? 'B' : 'S';
+  const col = rank === 'S' ? '#ff7ad9' : rank === 'B' ? C.green : '#9aa0b0';
+  drawPixelText(ctx, rank, 140, 6, col, 3);
+  if (tt > 3.7) text(ctx, 'X2 COMBO', 112, 24, C.white);
+  rain(ctx, t, 0.6);
+};

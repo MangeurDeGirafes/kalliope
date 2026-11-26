@@ -23,6 +23,11 @@ export interface FinishStats {
   totalEnemies: number;
   /** « SECRETS DU NIVEAU 1/2 » (vide si le niveau n'en a pas). */
   secrets?: string;
+  rank?: string;
+  medal?: 'gold' | 'silver' | 'bronze' | null;
+  score?: number;
+  scoreLines?: string[];
+  bestCombo?: number;
 }
 
 /** Log audio délivré par la balise (fragment du message de Sacha). */
@@ -51,12 +56,31 @@ export interface LevelCard {
   best: number | null;
   /** Couleur d'accent (ciel du niveau). */
   accent: number;
+  /** Meilleur rang et médaille obtenus. */
+  rank: string | null;
+  medal: 'gold' | 'silver' | 'bronze' | null;
+}
+
+/** Bonus actif affiché sous les jauges. */
+export interface PowerChip {
+  name: string;
+  color: string;
+  /** Temps restant (0 → 1), ou -1 pour un bonus sans durée (bouclier). */
+  frac: number;
+}
+
+/** Barre du boss (cœurs restants). */
+export interface BossStatus {
+  name: string;
+  /** Points de vie de chaque cœur (0 → 1). */
+  cores: number[];
 }
 
 const WEAPON_LABELS: Record<WeaponId, string> = {
   blades: 'LAMES MANTIS',
   pistol: 'PISTOLET CYBER',
   monowire: 'MONOWIRE',
+  gorilla: 'BRAS GORILLE',
 };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, parent?: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
@@ -87,6 +111,8 @@ export class HUD {
   onJournalClick: (() => void) | null = null;
   /** Bascule frère / sœur pour Sacha. */
   onSiblingClick: (() => void) | null = null;
+  /** Coupe / remet la musique. */
+  onMusicClick: (() => void) | null = null;
 
   private readonly root: HTMLDivElement;
   private readonly levelLabel: HTMLDivElement;
@@ -109,6 +135,17 @@ export class HUD {
   private readonly objective: HTMLDivElement;
   private readonly secretToast: HTMLDivElement;
   private readonly fadeEl: HTMLDivElement;
+  private readonly styleEl: HTMLDivElement;
+  private readonly styleRank: HTMLDivElement;
+  private readonly styleBar: HTMLDivElement;
+  private readonly styleCombo: HTMLDivElement;
+  private readonly stylePopEl: HTMLDivElement;
+  private readonly powersEl: HTMLDivElement;
+  private readonly bossEl: HTMLDivElement;
+  private lastStyleKey = '';
+  private lastPowersKey = '';
+  private lastBossKey = '';
+  private popTimer: number | null = null;
   private secretTimer: number | null = null;
   private typeTimer: number | null = null;
   private typeFull = '';
@@ -160,8 +197,8 @@ export class HUD {
     for (let i = 0; i < maxHealth; i++) this.healthPips.push(el('span', 'pip', this.hpBox));
 
     const right = el('div', 'hud-right', this.root);
-    (['blades', 'pistol', 'monowire'] as WeaponId[]).forEach((id, i) => {
-      const slot = el('div', `weapon-slot${id === 'monowire' ? ' locked' : ''}`, right);
+    (['blades', 'pistol', 'monowire', 'gorilla'] as WeaponId[]).forEach((id, i) => {
+      const slot = el('div', `weapon-slot${id === 'monowire' || id === 'gorilla' ? ' locked' : ''}`, right);
       el('span', 'key', slot, String(i + 1));
       el('span', 'name', slot, WEAPON_LABELS[id]);
       this.weaponSlots.set(id, slot);
@@ -172,6 +209,14 @@ export class HUD {
     this.prompt = el('div', 'hud-prompt', this.root);
     this.dialogue = el('div', 'hud-dialogue', this.root);
     this.secretToast = el('div', 'hud-secret', this.root);
+    this.styleEl = el('div', 'hud-style', this.root);
+    this.styleRank = el('div', 'st-rank', this.styleEl, 'D');
+    const styleTrack = el('div', 'st-bar', this.styleEl);
+    this.styleBar = el('div', 'st-fill', styleTrack);
+    this.styleCombo = el('div', 'st-combo', this.styleEl);
+    this.stylePopEl = el('div', 'st-pop', this.styleEl);
+    this.powersEl = el('div', 'hud-powers', this.root);
+    this.bossEl = el('div', 'hud-boss', this.root);
     this.fadeEl = el('div', 'hud-fade', container);
     el('div', 'hud-hint', this.root, 'R : RECOMMENCER · ÉCHAP : PAUSE');
 
@@ -214,6 +259,11 @@ export class HUD {
       if (target?.closest('[data-act="journal"]')) {
         e.stopPropagation();
         this.onJournalClick?.();
+        return;
+      }
+      if (target?.closest('[data-act="music"]')) {
+        e.stopPropagation();
+        this.onMusicClick?.();
         return;
       }
       if (target?.closest('[data-act="sibling"]')) {
@@ -314,6 +364,62 @@ export class HUD {
     this.objective.classList.toggle('show', text !== null);
   }
 
+  /** Jauge de style : lettre, progression vers la suivante, combo. */
+  setStyle(rank: string, progress: number, visible: boolean, combo: number, comboFrac: number): void {
+    const key = `${visible ? 1 : 0}${rank}${Math.round(progress * 20)}${combo}${Math.round(comboFrac * 20)}`;
+    if (key === this.lastStyleKey) return;
+    this.lastStyleKey = key;
+    this.styleEl.classList.toggle('show', visible || combo > 0);
+    if (this.styleRank.textContent !== rank) {
+      this.styleRank.textContent = rank;
+      this.styleRank.className = `st-rank r-${rank}`;
+      this.styleRank.classList.remove('pop');
+      void this.styleRank.offsetWidth;
+      this.styleRank.classList.add('pop');
+    }
+    this.styleBar.style.width = `${Math.round(progress * 100)}%`;
+    this.styleCombo.textContent = combo > 1 ? `×${combo} COMBO` : '';
+    this.styleCombo.style.opacity = String(0.4 + comboFrac * 0.6);
+  }
+
+  /** Points gagnés et bonus de manière (« +180 AÉRIEN »). */
+  stylePop(text: string): void {
+    this.stylePopEl.textContent = text;
+    this.stylePopEl.classList.remove('show');
+    void this.stylePopEl.offsetWidth;
+    this.stylePopEl.classList.add('show');
+    if (this.popTimer !== null) window.clearTimeout(this.popTimer);
+    this.popTimer = window.setTimeout(() => this.stylePopEl.classList.remove('show'), 1300);
+  }
+
+  /** Bonus actifs avec leur temps restant. */
+  setPowers(chips: PowerChip[]): void {
+    const key = chips.map((c) => `${c.name}${Math.round(c.frac * 30)}`).join('|');
+    if (key === this.lastPowersKey) return;
+    this.lastPowersKey = key;
+    this.powersEl.innerHTML = chips
+      .map(
+        (c) =>
+          `<div class="pw-chip" style="--pw:${c.color}"><span class="pw-name">${c.name}</span>${c.frac >= 0 ? `<span class="pw-bar"><i style="width:${Math.round(c.frac * 100)}%"></i></span>` : ''}</div>`,
+      )
+      .join('');
+  }
+
+  /** Barre du boss (null pour la masquer). */
+  setBoss(status: BossStatus | null): void {
+    const key = status ? `${status.name}${status.cores.map((c) => Math.round(c * 20)).join(',')}` : '';
+    if (key === this.lastBossKey) return;
+    this.lastBossKey = key;
+    if (!status) {
+      this.bossEl.classList.remove('show');
+      return;
+    }
+    this.bossEl.classList.add('show');
+    this.bossEl.innerHTML = `<div class="boss-name">${status.name}</div><div class="boss-cores">${status.cores
+      .map((c) => `<span class="boss-core${c <= 0 ? ' dead' : ''}"><i style="width:${Math.round(c * 100)}%"></i></span>`)
+      .join('')}</div>`;
+  }
+
   /** Fondu au noir bref (ascenseurs). */
   fade(): void {
     this.fadeEl.classList.remove('show');
@@ -367,7 +473,7 @@ export class HUD {
     const ready = visible && level >= 1;
     const cooling = !visible && cooldown >= 0;
     const q = visible ? Math.min(99, Math.floor(level * 100)) : cooling ? Math.floor(cooldown * 100) : -1;
-    const key = (ready ? 1000 : q) + (cooling ? 2000 : 0) + (kind === 'pistol' ? 5000 : kind === 'monowire' ? 10000 : 0);
+    const key = (ready ? 1000 : q) + (cooling ? 2000 : 0) + (kind === 'pistol' ? 5000 : kind === 'monowire' ? 10000 : kind === 'gorilla' ? 20000 : 0);
     if (key === this.lastCharge) return;
     this.lastCharge = key;
     this.chargeRing.classList.toggle('show', visible || cooling);
@@ -375,8 +481,9 @@ export class HUD {
     this.chargeRing.classList.toggle('cooling', cooling);
     this.chargeRing.classList.toggle('pistol', kind === 'pistol');
     this.chargeRing.classList.toggle('monowire', kind === 'monowire');
+    this.chargeRing.classList.toggle('gorilla', kind === 'gorilla');
     this.chargeLabel.classList.toggle('show', ready);
-    this.chargeLabel.textContent = kind === 'pistol' ? 'CHEVROTINE !' : kind === 'monowire' ? 'BALAYAGE !' : 'RELÂCHE !';
+    this.chargeLabel.textContent = kind === 'pistol' ? 'CHEVROTINE !' : kind === 'monowire' ? 'BALAYAGE !' : kind === 'gorilla' ? 'SÉISME !' : 'RELÂCHE !';
     this.chargeRing.style.setProperty('--charge', String(ready ? 100 : Math.max(0, q)));
   }
 
@@ -426,7 +533,7 @@ export class HUD {
             <span class="lc-name">${l.name}</span>
             <span class="lc-sub">${l.subtitle}</span>
             <span class="lc-foot"><span class="lc-diff" aria-label="Difficulté ${l.difficulty} sur 4">${pips}</span>
-            <span class="lc-best">${l.best !== null ? `★ ${HUD.formatTime(l.best)}` : 'NON TERMINÉ'}</span></span>
+            <span class="lc-best">${l.rank ? `<b class="lc-rank r-${l.rank}">${l.rank}</b>` : ''}${l.best !== null ? `<span class="medal ${l.medal ?? 'none'}">★</span> ${HUD.formatTime(l.best)}` : 'NON TERMINÉ'}</span></span>
           </button>`;
       })
       .join('');
@@ -451,7 +558,7 @@ export class HUD {
       </div>`;
   }
 
-  showPause(): void {
+  showPause(musicOn = true): void {
     this.overlayShownAt = performance.now();
     this.overlay.className = 'overlay show pause';
     this.overlay.innerHTML = `
@@ -461,9 +568,10 @@ export class HUD {
         <div class="btn-row">
           <button class="overlay-btn" data-act="restart" type="button">↻ RECOMMENCER</button>
           <button class="overlay-btn" data-act="journal" type="button">▤ JOURNAL</button>
+          <button class="overlay-btn" data-act="music" type="button">♪ MUSIQUE : ${musicOn ? 'OUI' : 'NON'}</button>
           <button class="overlay-btn" data-act="menu" type="button">☰ NIVEAUX</button>
         </div>
-        ${this.touch ? '' : '<div class="sub">R : recommencer</div>'}
+        ${this.touch ? '' : '<div class="sub">R : recommencer · M : musique</div>'}
       </div>`;
   }
 
@@ -499,7 +607,8 @@ export class HUD {
       <div class="panel small${log && log.first ? ' with-log' : ''}">
         <div class="finish-main">
         <div class="title small">EXTRACTION RÉUSSIE</div>
-        <div class="big-time">${HUD.formatTime(s.time)}</div>
+        <div class="big-time">${HUD.formatTime(s.time)}${s.rank ? `<span class="fin-rank r-${s.rank}">${s.rank}</span>` : ''}</div>
+        ${s.score !== undefined ? `<div class="fin-score">${s.medal ? `<span class="medal ${s.medal}">★ ${s.medal === 'gold' ? 'OR' : s.medal === 'silver' ? 'ARGENT' : 'BRONZE'}</span> · ` : ''}SCORE ${s.score}${s.bestCombo && s.bestCombo > 1 ? ` · COMBO ×${s.bestCombo}` : ''}</div><div class="reward-lines">${(s.scoreLines ?? []).join(' · ')}</div>` : ''}
         <div class="stats">${s.isRecord ? '★ NOUVEAU RECORD ★' : `RECORD : ${s.best !== null ? HUD.formatTime(s.best) : '--'}`}</div>
         <div class="stats">CIBLES ÉLIMINÉES ${s.kills}/${s.totalEnemies}${s.secrets ? ` · ${s.secrets}` : ''}</div>
         <div class="reward"><span class="reward-total">+${reward.total} ¢</span><span class="reward-lines">${reward.lines.join(' · ')}</span></div>

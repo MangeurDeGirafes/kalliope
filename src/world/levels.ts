@@ -1,4 +1,5 @@
 import type { BillboardKind, RoofStyle } from './PixelTextures';
+import type { PowerUpDef } from './PowerUps';
 
 /**
  * Définition des niveaux (données pures, interprétées par LevelBuilder).
@@ -148,6 +149,14 @@ export interface LevelDef {
   theme: ThemeDef;
   /** Easter eggs du niveau. */
   secrets?: SecretDef[];
+  /** Bonus ramassables. */
+  powerups?: PowerUpDef[];
+  /** Temps des médailles or / argent / bronze (s). */
+  par: [number, number, number];
+  /** Thème musical (voir core/Music.ts). */
+  music: string;
+  /** Combat de boss : arène et position de la Sentinelle (la balise n'apparaît qu'après sa chute). */
+  boss?: { center: Vec3; floor: number; radius: number };
 }
 
 // -----------------------------------------------------------------------------
@@ -192,6 +201,14 @@ function padTo(endZ: number, roofTop: number, x = 0): PadDef {
 /** Niveau 1 : le parcours d'origine, avec les panneaux du tutoriel. */
 const NEON_ROOFTOPS: LevelDef = {
   id: 'toits-de-neon',
+  par: [34, 45, 60],
+  music: 'toits-de-neon',
+  powerups: [
+    ['overdrive', 0, 0, -22],
+    ['shield', -3, 0, -112],
+    ['surge', 3, 8, -172],
+    ['chrono', 4, 6, -255],
+  ],
   name: 'TOITS DE NÉON',
   subtitle: 'Le parcours d\'initiation : toutes les mécaniques',
   difficulty: 1,
@@ -308,6 +325,14 @@ const NEON_ROOFTOPS: LevelDef = {
 /** Niveau 2 : toits bas et marché de nuit, deux doubles wall-runs, glissades. */
 const NIGHT_MARKET: LevelDef = {
   id: 'marche-de-nuit',
+  par: [32, 42, 56],
+  music: 'marche-de-nuit',
+  powerups: [
+    ['overdrive', 0, 0, -18],
+    ['chrono', -17, -2.5, -48],
+    ['shield', 0, -0.5, -110],
+    ['surge', 0, -1, -210],
+  ],
   name: 'MARCHÉ DE NUIT',
   subtitle: 'Enchaîne les murs sans jamais ralentir',
   difficulty: 2,
@@ -385,6 +410,14 @@ const NIGHT_MARKET: LevelDef = {
 /** Niveau 3 : tours de verre, tremplins pour monter, vide à franchir au dash. */
 const GLASS_TOWERS: LevelDef = {
   id: 'tours-de-verre',
+  par: [30, 40, 54],
+  music: 'tours-de-verre',
+  powerups: [
+    ['shield', 0, 8, -50],
+    ['overdrive', 0, 16, -96],
+    ['chrono', 14.5, 18, -87],
+    ['surge', 0, 9, -195],
+  ],
   name: 'TOURS DE VERRE',
   subtitle: 'Monte, saute, dashe au-dessus du vide',
   difficulty: 3,
@@ -459,6 +492,14 @@ const GLASS_TOWERS: LevelDef = {
 /** Niveau 4 : descente vertigineuse sous l'orage, puis arène finale. */
 const THE_FALL: LevelDef = {
   id: 'la-chute',
+  par: [30, 40, 54],
+  music: 'la-chute',
+  powerups: [
+    ['overdrive', 0, 30, -12],
+    ['shield', 0, 25, -40],
+    ['chrono', 0, 15, -142],
+    ['surge', 0, 14.5, -196],
+  ],
   name: 'LA CHUTE',
   subtitle: 'Descente sous l\'orage et arène finale',
   difficulty: 4,
@@ -519,4 +560,67 @@ const THE_FALL: LevelDef = {
   theme: { fog: 0x1e0612, fogDensity: 0.0075, rain: 1, skyHorizon: 0x4a0f24, skyGlow: 0xff2040, skyWarm: 0xff5a3c, ambient: 0x4a2a5a, key: 0xff4a3c, storm: true },
 };
 
-export const LEVELS: readonly LevelDef[] = [NEON_ROOFTOPS, NIGHT_MARKET, GLASS_TOWERS, THE_FALL];
+/** Niveau 5 : la Purge. Courte approche puis arène au sommet de la tour d'Aegis et combat contre la Sentinelle. */
+const THE_PURGE: LevelDef = {
+  id: 'la-purge',
+  name: 'LA PURGE',
+  subtitle: 'Abats la Sentinelle d\'Aegis',
+  difficulty: 4,
+  par: [75, 100, 140],
+  music: 'la-purge',
+  spawn: [0, 20, 6],
+  spawnYaw: 0,
+  buildings: [
+    roof(0, 10, -22, 20, 16, 'red', 3, 'rust', 401),
+    roof(0, -30, -58, 20, 16, 'purple', 4, 'tar', 402),
+    roof(0, -68, -92, 28, 16, 'cyan', 7, 'concrete', 403),
+    roof(0, -124, -172, 27.5, 40, 'red', 7, 'tar'),
+    // Piliers de l'arène (couverture contre les tirs)
+    { x: -9, z: -136, w: 2, d: 2, top: 31.5, trim: 'red', facade: 7, roof: 'tar', side: true },
+    { x: 9, z: -136, w: 2, d: 2, top: 31.5, trim: 'red', facade: 7, roof: 'tar', side: true },
+    { x: -9, z: -160, w: 2, d: 2, top: 31.5, trim: 'red', facade: 7, roof: 'tar', side: true },
+    { x: 9, z: -160, w: 2, d: 2, top: 31.5, trim: 'red', facade: 7, roof: 'tar', side: true },
+  ],
+  walls: wallPair(-92, 28, 'vertigo', 'kalliope'),
+  barriers: [{ x: 0, z: -40, roofWidth: 16, roofY: 20 }],
+  pads: [
+    padTo(-58, 20),
+    // Tremplins de l'arène : propulsent vers la Sentinelle
+    { pos: [-14, 27.5, -148], power: 17, boost: [7, 0, 0] },
+    { pos: [14, 27.5, -148], power: 17, boost: [-7, 0, 0] },
+  ],
+  guards: [
+    [4, 20, -16, 0],
+    [-5, 20, -48, 0.2],
+    [5, 20, -52, -0.2],
+    [-4, 28, -80, 0.2],
+    [4, 28, -86, -0.2],
+  ],
+  drones: [
+    [0, 26, -44],
+    [-8, 33, -140],
+    [8, 33, -156],
+  ],
+  holos: [
+    { lines: ['NIVEAU 5 : LA PURGE', 'LA SENTINELLE T\'ATTEND'], pos: [0, 22.8, -4], color: 'red', width: 5.5 },
+    { lines: ['RENVOIE SES TIRS', 'FRAPPE SES CŒURS QUAND ELLE DESCEND'], pos: [0, 31, -118], color: 'yellow', width: 6 },
+  ],
+  lights: [
+    { pos: [0, 26, -10], color: 'red', intensity: 22, distance: 30 },
+    { pos: [0, 34, -80], color: 'cyan', intensity: 22, distance: 30 },
+    { pos: [-12, 33, -148], color: 'purple', intensity: 26, distance: 32 },
+    { pos: [12, 33, -148], color: 'red', intensity: 26, distance: 32 },
+  ],
+  finish: [0, 27.5, -148],
+  boss: { center: [0, 27.5, -148], floor: 27.5, radius: 18 },
+  powerups: [
+    ['overdrive', 0, 20, -12],
+    ['shield', -15, 27.5, -130, 20],
+    ['surge', 15, 27.5, -130, 25],
+    ['chrono', -15, 27.5, -166, 25],
+    ['shield', 15, 27.5, -166, 20],
+  ],
+  theme: { fog: 0x200814, fogDensity: 0.0078, rain: 0.8, skyHorizon: 0x4a0a2a, skyGlow: 0xff3b6a, skyWarm: 0xff6a3c, ambient: 0x5a2050, key: 0xff3b3b, storm: true },
+};
+
+export const LEVELS: readonly LevelDef[] = [NEON_ROOFTOPS, NIGHT_MARKET, GLASS_TOWERS, THE_FALL, THE_PURGE];

@@ -2,6 +2,7 @@
  * Synthétiseur d'effets sonores 100 % procédural (Web Audio API).
  * Aucun fichier audio : tout est généré à partir d'oscillateurs et de bruit filtré.
  */
+import { Music } from './Music';
 
 type LoopChannel = {
   gain: GainNode;
@@ -24,6 +25,9 @@ export class AudioSynthesizer {
   private chargeHum: { gain: GainNode; osc: OscillatorNode; sub: OscillatorNode; level: number } | null = null;
   /** Facteur de hauteur global (abaissé pendant le Sandevistan). */
   private pitch = 1;
+  private music: Music | null = null;
+  /** Réglages musicaux mémorisés avant la création du contexte audio. */
+  private musicState = { theme: 'plaza', intensity: 0.2, enabled: true, paused: false };
 
   get ready(): boolean {
     return this.ctx !== null;
@@ -73,6 +77,12 @@ export class AudioSynthesizer {
     for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
 
     this.startAmbience();
+    // La musique passe par le filtre du Sandevistan : étouffée pendant le ralenti
+    this.music = new Music(ctx, this.slowFilter, this.noiseBuffer);
+    this.music.setTheme(this.musicState.theme);
+    this.music.setIntensity(this.musicState.intensity);
+    this.music.setEnabled(this.musicState.enabled);
+    this.music.setPaused(this.musicState.paused);
     this.wallRunLoop = this.createLoop('bandpass', 2400, 1.2);
     this.slideLoop = this.createLoop('lowpass', 900, 0.7);
     this.createSandevistanHum();
@@ -92,6 +102,35 @@ export class AudioSynthesizer {
     if (this.sandevistanHum) {
       this.sandevistanHum.gain.gain.setTargetAtTime(active ? 0.05 : 0, t, 0.1);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Musique
+  // ---------------------------------------------------------------------------
+
+  setMusicTheme(id: string): void {
+    this.musicState.theme = id;
+    this.music?.setTheme(id);
+  }
+
+  setMusicIntensity(level: number): void {
+    this.musicState.intensity = level;
+    this.music?.setIntensity(level);
+  }
+
+  setMusicEnabled(on: boolean): void {
+    this.musicState.enabled = on;
+    this.music?.setEnabled(on);
+  }
+
+  setMusicPaused(paused: boolean): void {
+    if (this.musicState.paused === paused) return;
+    this.musicState.paused = paused;
+    this.music?.setPaused(paused);
+  }
+
+  get musicEnabled(): boolean {
+    return this.musicState.enabled;
   }
 
   setWallRunning(active: boolean): void {
@@ -168,6 +207,31 @@ export class AudioSynthesizer {
     this.tone({ type: 'square', from: 900, to: 70, duration: 0.22, volume: 0.2 });
     this.tone({ type: 'sine', from: 70, to: 30, duration: 0.3, volume: 0.42 });
     this.noise({ duration: 0.12, volume: 0.3, type: 'highpass', from: 4000, to: 1800, q: 0.5, delay: 0.02 });
+  }
+
+  /** Coup de poing des bras gorille. */
+  playPunch(): void {
+    this.tone({ type: 'sine', from: 170, to: 55, duration: 0.14, volume: 0.32 });
+    this.noise({ duration: 0.09, volume: 0.28, type: 'lowpass', from: 2400, to: 400, q: 0.6 });
+  }
+
+  /** Impact du séisme / de la frappe météore. */
+  playSlam(): void {
+    this.noise({ duration: 0.7, volume: 0.6, type: 'lowpass', from: 1800, to: 120, q: 0.7 });
+    this.tone({ type: 'sine', from: 90, to: 24, duration: 0.7, volume: 0.55 });
+    this.tone({ type: 'square', from: 220, to: 60, duration: 0.25, volume: 0.12 });
+  }
+
+  /** Bonus ramassé. */
+  playPowerUp(): void {
+    [523, 784, 1047, 1568].forEach((f, i) => this.tone({ type: 'square', from: f, to: f * 1.01, duration: 0.1, volume: 0.05, delay: i * 0.06, raw: true }));
+    this.tone({ type: 'sine', from: 400, to: 1600, duration: 0.35, volume: 0.06, raw: true });
+  }
+
+  /** Bouclier qui encaisse un tir. */
+  playShieldHit(): void {
+    this.tone({ type: 'triangle', from: 1800, to: 900, duration: 0.3, volume: 0.12, raw: true });
+    this.noise({ duration: 0.2, volume: 0.2, type: 'highpass', from: 4000, to: 2000, q: 0.6, raw: true });
   }
 
   /** Claquement du monowire : sifflement aigu puis fouet. */

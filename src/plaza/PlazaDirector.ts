@@ -68,6 +68,11 @@ export class PlazaDirector {
     this.raceTime = -1;
   }
 
+  /** Course de Petit Zéro en cours. */
+  get racing(): boolean {
+    return this.raceTime >= 0;
+  }
+
   /** Bloque brièvement l'interaction (fermeture d'une boutique avec E…). */
   holdInteract(seconds: number): void {
     this.interactCooldown = Math.max(this.interactCooldown, seconds);

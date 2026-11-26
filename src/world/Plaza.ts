@@ -97,6 +97,8 @@ export function plazaDef(exitLabel: string): LevelDef {
     name: 'LA PLAZA',
     subtitle: 'Marchands, secrets et repos',
     difficulty: 1,
+    par: [0, 0, 0],
+    music: 'plaza',
     spawn: [0, 0, 20],
     spawnYaw: 0,
     buildings: [

@@ -52,13 +52,30 @@ interface Projectile {
   owner: Enemy | null;
   /** Cible poursuivie par un projectile renvoyé. */
   homing: Enemy | null;
+  /** Cible extérieure (cœur du boss) poursuivie par un projectile renvoyé. */
+  homingTarget: ExternalTarget | null;
   active: boolean;
   friendly: boolean;
   life: number;
 }
 
+/** Origine d'une élimination (points de style). */
+export type KillCause = 'melee' | 'shot' | 'deflect' | 'charged' | 'wire' | 'slam';
+
+/**
+ * Cible extérieure touchable par toutes les armes (cœurs du boss) : tirs,
+ * frappes au corps à corps et projectiles renvoyés.
+ */
+export interface ExternalTarget {
+  readonly center: THREE.Vector3;
+  readonly radius: number;
+  isActive(): boolean;
+  hit(amount: number, dir: THREE.Vector3, cause: KillCause): void;
+}
+
 export interface EnemyRayHit {
-  enemy: Enemy;
+  enemy: Enemy | null;
+  target: ExternalTarget | null;
   distance: number;
   point: THREE.Vector3;
 }
@@ -74,7 +91,9 @@ const FRIENDLY_CYAN = new THREE.Color(0.1, 0.9, 1);
  */
 export class EnemyManager {
   /** Appelé à chaque élimination. */
-  onKill: ((enemy: Enemy, position: THREE.Vector3) => void) | null = null;
+  onKill: ((enemy: Enemy, position: THREE.Vector3, cause: KillCause) => void) | null = null;
+  /** Cibles extérieures (boss) enregistrées pour le niveau en cours. */
+  readonly targets: ExternalTarget[] = [];
 
   private readonly scene: THREE.Scene;
   private readonly physics: Physics;
@@ -122,11 +141,17 @@ export class EnemyManager {
     this.physics = physics;
     this.particles = particles;
     this.audio = audio;
-    for (let i = 0; i < 48; i++) this.projectiles.push(this.createProjectile());
+    for (let i = 0; i < 72; i++) this.projectiles.push(this.createProjectile());
   }
 
   get totalCount(): number {
     return this.enemies.length;
+  }
+
+  /** Au moins un ennemi en alerte (visée ou recharge) : sert à l'intensité de la musique. */
+  get alert(): boolean {
+    for (const e of this.enemies) if (e.alive && e.state !== 'idle') return true;
+    return false;
   }
 
   get aliveCount(): number {
@@ -193,8 +218,27 @@ export class EnemyManager {
    * Frappe les ennemis à portée dans le cône de visée (dégâts infinis = mort
    * immédiate). Renvoie le nombre de victimes ; `hits` compte aussi les blessés.
    */
-  meleeSweep(origin: THREE.Vector3, forward: THREE.Vector3, range: number, cosAngle: number, damage = Infinity, hits?: { count: number }): number {
+  meleeSweep(
+    origin: THREE.Vector3,
+    forward: THREE.Vector3,
+    range: number,
+    cosAngle: number,
+    damage = Infinity,
+    hits?: { count: number },
+    cause: KillCause = 'melee',
+  ): number {
     let kills = 0;
+    for (const t of this.targets) {
+      if (!t.isActive()) continue;
+      const toT = this.tmp.subVectors(t.center, origin);
+      const dist = toT.length();
+      if (dist - t.radius > range) continue;
+      const facing = dist < 1e-3 ? 1 : toT.dot(forward) / dist;
+      if (facing >= cosAngle || dist < t.radius + 0.9) {
+        if (hits) hits.count++;
+        t.hit(damage === Infinity ? 1 : damage, forward, cause);
+      }
+    }
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const radius = this.closestPointOnEnemy(e, origin, this.tmp);
@@ -204,7 +248,7 @@ export class EnemyManager {
       const facing = dist < 1e-3 ? 1 : toEnemy.dot(forward) / dist;
       if (facing >= cosAngle || dist < radius + 0.9) {
         if (hits) hits.count++;
-        if (this.damage(e, damage, forward)) kills++;
+        if (this.damage(e, damage, forward, cause)) kills++;
       }
     }
     return kills;
@@ -252,6 +296,15 @@ export class EnemyManager {
   raycast(origin: THREE.Vector3, dir: THREE.Vector3, maxDistance: number, assistRadius = 0): EnemyRayHit | null {
     this.ray.set(origin, dir);
     let best: EnemyRayHit | null = null;
+    for (const t of this.targets) {
+      if (!t.isActive()) continue;
+      this.sphere.center.copy(t.center);
+      this.sphere.radius = t.radius + assistRadius * 0.5;
+      const p = this.ray.intersectSphere(this.sphere, this.tmp3);
+      if (!p) continue;
+      const d = p.distanceTo(origin);
+      if (d <= maxDistance && (!best || d < best.distance)) best = { enemy: null, target: t, distance: d, point: p.clone() };
+    }
     for (const e of this.enemies) {
       if (!e.alive) continue;
       for (const s of this.hitSpheres(e)) {
@@ -261,7 +314,7 @@ export class EnemyManager {
         if (!p) continue;
         const d = p.distanceTo(origin);
         if (d <= maxDistance && (!best || d < best.distance)) {
-          best = { enemy: e, distance: d, point: p.clone() };
+          best = { enemy: e, target: null, distance: d, point: p.clone() };
         }
       }
     }
@@ -281,7 +334,18 @@ export class EnemyManager {
       // Renvoi assisté : si le tireur est à peu près dans l'axe de visée, on le vise.
       const dir = this.tmp2.copy(forward);
       p.homing = null;
-      if (p.owner && p.owner.alive) {
+      p.homingTarget = null;
+      // Projectile du boss : renvoyé vers un cœur visé à peu près
+      for (const t of this.targets) {
+        if (!t.isActive()) continue;
+        const toT = this.tmp3.subVectors(t.center, p.group.position).normalize();
+        if (toT.dot(forward) > Math.cos(THREE.MathUtils.degToRad(40))) {
+          dir.copy(toT);
+          p.homingTarget = t;
+          break;
+        }
+      }
+      if (!p.homingTarget && p.owner && p.owner.alive) {
         const toOwner = this.tmp3.subVectors(p.owner.center, p.group.position).normalize();
         if (toOwner.dot(forward) > Math.cos(THREE.MathUtils.degToRad(35))) {
           dir.copy(toOwner);
@@ -301,11 +365,11 @@ export class EnemyManager {
   }
 
   /** Inflige des dégâts ; renvoie vrai si l'ennemi meurt. Une touche non mortelle interrompt sa visée. */
-  damage(e: Enemy, amount: number, hitDir: THREE.Vector3): boolean {
+  damage(e: Enemy, amount: number, hitDir: THREE.Vector3, cause: KillCause = 'melee'): boolean {
     if (!e.alive) return false;
     e.hp -= amount;
     if (e.hp <= 0) {
-      this.kill(e, hitDir);
+      this.kill(e, hitDir, cause);
       return true;
     }
     e.state = 'cooldown';
@@ -317,7 +381,7 @@ export class EnemyManager {
     return false;
   }
 
-  kill(e: Enemy, hitDir: THREE.Vector3): void {
+  kill(e: Enemy, hitDir: THREE.Vector3, cause: KillCause = 'melee'): void {
     if (!e.alive) return;
     e.alive = false;
     e.root.visible = false;
@@ -341,7 +405,7 @@ export class EnemyManager {
       spread: 0.6,
     });
     this.audio.playExplosion();
-    this.onKill?.(e, pos);
+    this.onKill?.(e, pos, cause);
   }
 
   // ---------------------------------------------------------------------------
@@ -499,6 +563,23 @@ export class EnemyManager {
     this.setVisor(e, 4 + progress * 6);
   }
 
+  /** Projectile hostile tiré par une source extérieure (boss), renvoyable aux lames. */
+  fireProjectile(from: THREE.Vector3, dir: THREE.Vector3, speed: number, color: THREE.Color): void {
+    const p = this.projectiles.find((q) => !q.active);
+    if (!p) return;
+    p.active = true;
+    p.friendly = false;
+    p.owner = null;
+    p.homing = null;
+    p.homingTarget = null;
+    p.life = ENEMIES.projectileLifetime;
+    p.velocity.copy(dir).normalize().multiplyScalar(speed);
+    p.group.position.copy(from);
+    p.group.visible = true;
+    p.coreMaterial.color.copy(color).multiplyScalar(6 * LIGHTING.enemyGlow);
+    p.glowMaterial.color.copy(color).multiplyScalar(2.2 * LIGHTING.enemyGlow);
+  }
+
   private fire(e: Enemy, muzzle: THREE.Vector3, speed: number): void {
     const p = this.projectiles.find((q) => !q.active);
     if (!p) return;
@@ -507,6 +588,7 @@ export class EnemyManager {
     p.friendly = false;
     p.owner = e;
     p.homing = null;
+    p.homingTarget = null;
     p.life = ENEMIES.projectileLifetime;
     p.velocity.copy(dir).multiplyScalar(speed);
     p.group.position.copy(muzzle);
@@ -528,9 +610,10 @@ export class EnemyManager {
         continue;
       }
       const speed = p.velocity.length();
-      if (p.friendly && p.homing && p.homing.alive) {
+      const homeOn = p.friendly ? (p.homing && p.homing.alive ? p.homing.center : p.homingTarget && p.homingTarget.isActive() ? p.homingTarget.center : null) : null;
+      if (homeOn) {
         // Légère correction de trajectoire vers la cible (projectile renvoyé)
-        const desired = this.tmp3.subVectors(p.homing.center, p.group.position).normalize().multiplyScalar(speed);
+        const desired = this.tmp3.subVectors(homeOn, p.group.position).normalize().multiplyScalar(speed);
         p.velocity.lerp(desired, 1 - Math.exp(-8 * dt)).setLength(speed);
       }
       const step = speed * dt;
@@ -552,9 +635,20 @@ export class EnemyManager {
         for (const e of this.enemies) {
           if (!e.alive) continue;
           if (segmentPointDistance(start, p.group.position, e.center) < (e.type === 'guard' ? 0.8 : 0.7)) {
-            this.kill(e, dir);
+            this.kill(e, dir, 'deflect');
             this.deactivate(p);
             break;
+          }
+        }
+        if (p.active) {
+          for (const t of this.targets) {
+            if (!t.isActive()) continue;
+            if (segmentPointDistance(start, p.group.position, t.center) < t.radius + 0.3) {
+              t.hit(2, dir, 'deflect');
+              this.particles.sparks(p.group.position, null, 0x40e0ff, 30);
+              this.deactivate(p);
+              break;
+            }
           }
         }
         if (!p.active) continue;
@@ -799,6 +893,7 @@ export class EnemyManager {
       velocity: new THREE.Vector3(),
       owner: null,
       homing: null,
+      homingTarget: null,
       active: false,
       friendly: false,
       life: 0,

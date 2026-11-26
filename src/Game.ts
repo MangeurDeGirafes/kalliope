@@ -12,13 +12,14 @@ import type { LevelData } from './world/LevelBuilder';
 import { LEVELS } from './world/levels';
 import { CAT_COUNT, Plaza, plazaDef } from './world/Plaza';
 import { buildSecret, raySphere } from './world/Secrets';
+import { Boss } from './enemies/Boss';
 import type { SecretRuntime } from './world/Secrets';
 import { PlazaDirector, SECRET_TOTAL } from './plaza/PlazaDirector';
 import { Journal } from './ui/Journal';
 import type { JournalData } from './ui/Journal';
 import { STORY_LOGS, logFlag, logForLevel, lorePages, siblingWords } from './story/Story';
 import { HUD } from './ui/HUD';
-import type { FinishLog, LevelCard } from './ui/HUD';
+import type { FinishLog, LevelCard, PowerChip } from './ui/HUD';
 import { TouchControls } from './ui/TouchControls';
 import { Tutorial } from './ui/Tutorial';
 import { Shop } from './ui/Shop';
@@ -26,6 +27,10 @@ import type { ShopItem, ShopVendor } from './ui/Shop';
 import { Progress, STATS, UPGRADES } from './progress/Progress';
 import type { VendorId } from './progress/Progress';
 import { IS_TOUCH, vibrate } from './core/Device';
+import { StyleMeter, medalFor, rankBonus, scoreRun, RANK_ORDER } from './game/Style';
+import type { Rank } from './game/Style';
+import { POWER_INFO, PowerUpField } from './world/PowerUps';
+import type { PowerKind } from './world/PowerUps';
 import { CHARGED, COMBAT, SANDEVISTAN, TOUCH } from './config';
 
 type GameState = 'menu' | 'playing' | 'paused' | 'dead' | 'finished' | 'shop';
@@ -74,6 +79,8 @@ const VENDORS: Record<VendorId | 'indic', ShopVendor & { thanks: string[]; soldO
 };
 
 const HINT_PRICE = 15;
+const RANK_PREFIX = 'neon-vertigo-rank-';
+const MUSIC_KEY = 'neon-vertigo-music';
 const SECRET_REWARD = 25;
 
 /** Ancien record (avant les niveaux multiples) : celui du premier parcours. */
@@ -111,6 +118,12 @@ export class Game {
   /** Easter eggs du niveau en cours. */
   private secrets: SecretRuntime[] = [];
   private secretTime = 0;
+  private readonly style = new StyleMeter();
+  /** Boss du niveau en cours (niveau 5). */
+  private boss: Boss | null = null;
+  private readonly powerups = new PowerUpField();
+  /** Bonus actifs : temps restant (s). */
+  private readonly powers = new Map<PowerKind, number>();
 
   private state: GameState = 'menu';
   private lastTime = 0;
@@ -171,6 +184,7 @@ export class Game {
       fragments: () => this.fragments(),
     });
     this.applyLoadout();
+    this.audio.setMusicEnabled(this.readValue(MUSIC_KEY) !== '0');
     this.loadLevel(this.readLastLevel());
 
     this.wireEvents();
@@ -229,6 +243,10 @@ export class Game {
       if (!this.touch) this.input.requestPointerLock();
     };
     this.hud.onJournalClick = () => this.openJournal();
+    this.hud.onMusicClick = () => {
+      this.audio.init();
+      this.toggleMusic();
+    };
     this.hud.onSiblingClick = () => this.toggleSibling();
     this.journal.onToggleSibling = () => this.toggleSibling();
     this.weapons.onShot = (origin, dir, distance) => this.checkSecretShot(origin, dir, distance);
@@ -271,8 +289,12 @@ export class Game {
       this.player.addShake(0.5);
     };
 
-    this.enemies.onKill = () => {
+    this.enemies.onKill = (_e, _pos, cause) => {
       this.kills++;
+      if (this.mode === 'level' && this.state === 'playing') {
+        const r = this.style.kill(cause, { air: !this.player.grounded, wall: this.player.wallRunning, slow: this.player.sandevistanActive });
+        this.hud.stylePop(`+${r.gain}${r.labels.length ? ` ${r.labels.join(' · ')}` : ''}`);
+      }
       this.hitstop = COMBAT.hitstopDuration;
       this.player.addShake(COMBAT.killShake);
       this.player.rewardKill();
@@ -343,7 +365,26 @@ export class Game {
       onSandevistan: (active) => {
         if (active) this.hud.flashMessage('SANDEVISTAN', '#2bffb0', 900);
       },
+      onShield: () => {
+        this.audio.playShieldHit();
+        this.particles.burst(this.player.position, {
+          count: 40,
+          color: 0x2bffb0,
+          color2: 0xffffff,
+          intensity: 3,
+          speedMin: 3,
+          speedMax: 7,
+          lifeMin: 0.2,
+          lifeMax: 0.4,
+          sizeMin: 0.04,
+          sizeMax: 0.08,
+          gravity: 0,
+          drag: 4,
+        });
+        this.hud.flashMessage('BOUCLIER BRISÉ', '#2bffb0', 900);
+      },
       onHurt: () => {
+        this.style.hurt();
         vibrate(TOUCH.vibrationHurt);
         if (this.player.alive) this.hud.flashMessage('INTÉGRITÉ COMPROMISE', '#ff2040', 700);
       },
@@ -369,10 +410,125 @@ export class Game {
     const realDt = Math.min(0.05, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
     this.update(realDt);
+    this.updateMusic();
     this.input.endFrame();
   };
 
+  /** Intensité de la musique selon l'action (calme au menu, à fond en combat). */
+  private updateMusic(): void {
+    let k = 0.2;
+    if (this.state === 'menu') k = 0.15;
+    else if (this.mode === 'plaza') k = this.director.racing ? 0.75 : 0.3;
+    else if (this.state === 'playing') {
+      const speed = THREE.MathUtils.clamp(this.player.horizontalSpeed / 16, 0, 1);
+      k = 0.5 + speed * 0.15 + (this.enemies.alert || this.style.combo > 0 ? 0.3 : 0);
+      if (this.bossActive) k = 1;
+    } else if (this.state === 'dead') k = 0.2;
+    else if (this.state === 'finished') k = 0.4;
+    this.audio.setMusicIntensity(k);
+    this.audio.setMusicPaused(this.state === 'paused' || this.state === 'shop' || this.journal.isOpen);
+  }
+
+  /** Vrai pendant le combat contre le boss (niveau 5). */
+  private get bossActive(): boolean {
+    return this.boss?.engaged ?? false;
+  }
+
+  /** Branche la Sentinelle : cœurs ciblables, annonces, récompenses, balise finale. */
+  private setupBoss(boss: Boss): void {
+    this.enemies.targets.push(...boss.cores);
+    this.level.setFinishVisible(false);
+    boss.onMessage = (text, color) => this.hud.flashMessage(text, color, 1500);
+    boss.onCoreDestroyed = () => {
+      const gain = this.style.bonus(400);
+      this.hud.stylePop(`+${gain} CŒUR`);
+      this.hitstop = Math.max(this.hitstop, 0.25);
+      this.player.addShake(0.6);
+      vibrate(80);
+    };
+    boss.onDefeated = () => {
+      this.level.setFinishVisible(true);
+      const gain = this.style.bonus(1500);
+      this.hud.stylePop(`+${gain} SENTINELLE`);
+      this.hitstop = Math.max(this.hitstop, 0.5);
+      this.player.addShake(1);
+      vibrate(150);
+      this.hud.flashMessage('PURGE ANNULÉE · REJOINS LA BALISE', '#ffd23b', 3000);
+    };
+  }
+
+  private toggleMusic(): void {
+    const on = !this.audio.musicEnabled;
+    this.audio.setMusicEnabled(on);
+    this.writeValue(MUSIC_KEY, on ? '1' : '0');
+    this.hud.flashMessage(on ? '♪ MUSIQUE ACTIVÉE' : '♪ MUSIQUE COUPÉE', '#9fd8ff', 1000);
+    if (this.state === 'paused') this.hud.showPause(on);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bonus
+  // ---------------------------------------------------------------------------
+
+  private updatePowerUps(realDt: number): void {
+    const got = this.powerups.collect(this.player.position);
+    if (got) this.applyPower(got.kind, got.position);
+    for (const [kind, left] of this.powers) {
+      const t = left - realDt;
+      if (t <= 0) this.powers.delete(kind);
+      else this.powers.set(kind, t);
+    }
+    const overdrive = this.powers.has('overdrive');
+    this.player.speedBoost = overdrive ? 1.35 : 1;
+    this.player.freeDash = overdrive;
+    this.weapons.surge = this.powers.has('surge');
+  }
+
+  private applyPower(kind: PowerKind, at: THREE.Vector3): void {
+    const info = POWER_INFO[kind];
+    this.audio.playPowerUp();
+    vibrate(35);
+    this.particles.burst(at, {
+      count: 50,
+      color: info.color,
+      color2: 0xffffff,
+      intensity: 3.5,
+      speedMin: 2,
+      speedMax: 7,
+      lifeMin: 0.25,
+      lifeMax: 0.6,
+      sizeMin: 0.04,
+      sizeMax: 0.1,
+      gravity: 1,
+      drag: 3,
+    });
+    switch (kind) {
+      case 'overdrive':
+        this.powers.set('overdrive', info.duration);
+        this.player.dashCharges = STATS.dashMax;
+        break;
+      case 'surge':
+        this.powers.set('surge', info.duration);
+        break;
+      case 'shield':
+        this.player.shield = 1;
+        break;
+      case 'chrono':
+        this.player.sandevistanEnergy = 1;
+        this.elapsed = Math.max(0, this.elapsed - 3);
+        break;
+    }
+    this.hud.flashMessage(kind === 'chrono' ? 'CHRONO · −3 S' : info.name, info.css, 1200);
+  }
+
+  private powerChips(): PowerChip[] {
+    const chips: PowerChip[] = [];
+    for (const [kind, left] of this.powers) chips.push({ name: POWER_INFO[kind].name, color: POWER_INFO[kind].css, frac: left / POWER_INFO[kind].duration });
+    if (this.player.shield > 0) chips.push({ name: POWER_INFO.shield.name, color: POWER_INFO.shield.css, frac: -1 });
+    return chips;
+  }
+
   private update(realDt: number): void {
+    if (this.input.wasPressed('music')) this.toggleMusic();
     if (this.input.wasPressed('restart') && this.state !== 'menu') {
       this.audio.init();
       if (!this.touch && !this.input.isPointerLocked) this.input.requestPointerLock();
@@ -426,6 +582,7 @@ export class Game {
       this.checkJumpPads();
       this.checkKillPlane();
       this.checkSecretsNearby();
+      this.updatePowerUps(realDt);
       this.checkFinish();
     } else if (this.state === 'playing' && this.mode === 'plaza') {
       this.checkJumpPads();
@@ -434,12 +591,15 @@ export class Game {
 
     this.weapons.update(playerDt, realDt, this.input, controlsEnabled);
     this.enemies.update(worldDt, this.player);
+    if (this.mode === 'level' && this.boss && (this.state === 'playing' || this.state === 'dead')) this.boss.update(worldDt, this.player);
+    this.hud.setBoss(this.mode === 'level' && this.boss ? this.boss.status() : null);
     this.particles.setViewport(this.engine.viewportHeight, this.engine.camera.fov);
     this.level.setViewport(this.engine.viewportHeight, this.engine.camera.fov);
     this.particles.update(worldDt);
     this.level.update(worldDt, this.engine.camera.position);
     this.secretTime += worldDt;
     for (const sec of this.secrets) sec.update(worldDt, this.secretTime);
+    this.powerups.update(worldDt);
 
     if (this.state === 'dead') {
       this.deathTimer += realDt;
@@ -467,6 +627,10 @@ export class Game {
       maxHealth: STATS.maxHealth,
       speed: this.player.horizontalSpeed,
     });
+    this.hud.setPowers(this.mode === 'level' && this.state === 'playing' ? this.powerChips() : []);
+    const letter = this.style.letter;
+    this.style.update(realDt);
+    this.hud.setStyle(letter.rank, letter.progress, this.mode === 'level' && letter.visible, this.mode === 'level' ? this.style.combo : 0, this.style.comboProgress);
     this.hud.setCharge(
       this.weapons.chargeLevel,
       this.weapons.chargeVisible || this.weapons.isChargeStriking,
@@ -513,6 +677,13 @@ export class Game {
 
   private restart(): void {
     this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
+    this.style.reset();
+    this.powerups.reset();
+    this.powers.clear();
+    if (this.boss) {
+      this.boss.reset();
+      this.level.setFinishVisible(false);
+    }
     this.enemies.reset();
     this.particles.clear();
     this.weapons.reset();
@@ -540,7 +711,7 @@ export class Game {
     this.audio.stopLoops();
     this.input.releaseVirtual();
     this.touch?.setVisible(false);
-    this.hud.showPause();
+    this.hud.showPause(this.audio.musicEnabled);
   }
 
   private resume(): void {
@@ -615,6 +786,7 @@ export class Game {
 
   private checkFinish(): void {
     if (!this.player.alive) return;
+    if (this.boss && !this.boss.defeated) return;
     const f = this.levelData.finish;
     const dx = this.player.position.x - f.position.x;
     const dz = this.player.position.z - f.position.z;
@@ -628,6 +800,17 @@ export class Game {
     const isRecord = best === null || this.elapsed < best;
     if (isRecord) this.saveBestTime(this.currentLevel, this.elapsed);
     const reward = this.progress.levelReward(LEVELS[this.currentLevel].difficulty, this.kills, best === null, isRecord && best !== null);
+    // Rang et médaille de la course
+    const levelDef = LEVELS[this.currentLevel];
+    const run = scoreRun(this.elapsed, levelDef.par, this.kills, this.enemies.totalCount, this.style);
+    const medal = medalFor(this.elapsed, levelDef.par);
+    const bonus = rankBonus(run.rank);
+    if (bonus > 0) {
+      reward.total += bonus;
+      reward.lines.push(`RANG ${run.rank} +${bonus}`);
+    }
+    const prevRank = this.readValue(RANK_PREFIX + levelDef.id) as Rank | null;
+    if (!prevRank || RANK_ORDER.indexOf(run.rank) > RANK_ORDER.indexOf(prevRank)) this.writeValue(RANK_PREFIX + levelDef.id, run.rank);
     this.progress.addCredits(reward.total);
     this.audio.stopLoops();
     this.audio.playFinish();
@@ -656,6 +839,11 @@ export class Game {
         kills: this.kills,
         totalEnemies: this.enemies.totalCount,
         secrets: secrets.length > 0 ? `SECRETS DU NIVEAU ${found}/${secrets.length}` : '',
+        rank: run.rank,
+        medal,
+        score: run.score,
+        scoreLines: run.lines,
+        bestCombo: this.style.bestCombo,
       },
       'CONTINUER VERS LA PLAZA ▶',
       reward,
@@ -683,10 +871,16 @@ export class Game {
     const exit = LEVELS[this.plazaNext];
     const def = plazaDef(`NIVEAU ${this.plazaNext + 1} : ${exit.name}`);
     const plaza = new Plaza();
+    this.enemies.targets.length = 0;
+    this.boss = null;
     this.enemies.clearAll();
     this.particles.clear();
     this.secrets = [];
-    this.levelData = this.level.loadLevel(def, (b) => plaza.build(b, (id) => this.progress.hasEgg(id)));
+    this.levelData = this.level.loadLevel(def, (b) => {
+      plaza.build(b, (id) => this.progress.hasEgg(id));
+      this.powerups.build(b, []);
+    });
+    this.audio.setMusicTheme('plaza');
     this.plaza = plaza;
     this.director.attach(plaza);
     this.engine.setTheme(def.theme);
@@ -818,6 +1012,7 @@ export class Game {
       this.player.dashCharges = STATS.dashMax;
       this.applyLoadout();
       if (id === 'monowire') this.hud.flashMessage('MONOWIRE · TOUCHE 3', '#ff8a2b', 1800);
+      if (id === 'gorilla') this.hud.flashMessage('BRAS GORILLE · TOUCHE 4', '#ffa040', 1800);
       refresh(this.pickThanks(v.thanks));
     } else {
       this.audio.playDenied();
@@ -828,6 +1023,7 @@ export class Game {
   /** Armes débloquées et encre des lames selon la progression. */
   private applyLoadout(): void {
     if (this.progress.has('monowire')) this.weapons.unlocked.add('monowire');
+    if (this.progress.has('gorilla')) this.weapons.unlocked.add('gorilla');
     this.hud.setUnlocked(this.weapons.unlocked);
     this.applyInk();
   }
@@ -938,13 +1134,19 @@ export class Game {
     this.enemies.clearAll();
     this.particles.clear();
     const secrets: SecretRuntime[] = [];
+    this.enemies.targets.length = 0;
+    this.boss = null;
     this.levelData = this.level.loadLevel(def, (b) => {
       for (const sd of def.secrets ?? []) secrets.push(buildSecret(b, sd, this.progress.hasFlag(`secret-${sd.id}`)));
+      this.powerups.build(b, def.powerups ?? []);
+      if (def.boss) this.boss = new Boss(b, def.boss, { enemies: this.enemies, particles: this.particles, audio: this.audio });
     });
     this.secrets = secrets;
+    if (this.boss) this.setupBoss(this.boss);
     this.enemies.spawnAll(this.levelData.enemySpawns);
     this.engine.setTheme(def.theme);
     this.audio.setRainLevel(def.theme.rain);
+    this.audio.setMusicTheme(def.music);
     // Met à jour la structure d'accélération avant les premiers lancers de rayons
     this.physics.step();
     this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
@@ -966,13 +1168,19 @@ export class Game {
     this.enemies.reset();
     this.weapons.reset();
     this.hud.setVisible(false);
-    const cards: LevelCard[] = LEVELS.map((l, i) => ({
-      name: l.name,
-      subtitle: l.subtitle,
-      difficulty: l.difficulty,
-      best: this.loadBestTime(i),
-      accent: l.theme.skyGlow,
-    }));
+    const cards: LevelCard[] = LEVELS.map((l, i) => {
+      const best = this.loadBestTime(i);
+      return {
+        name: l.name,
+        subtitle: l.subtitle,
+        difficulty: l.difficulty,
+        best,
+        accent: l.theme.skyGlow,
+        rank: this.readValue(RANK_PREFIX + l.id),
+        medal: best !== null ? medalFor(best, l.par) : null,
+      };
+    });
+    this.audio.setMusicTheme('plaza');
     this.hud.showStart(cards, this.currentLevel, this.progress.credits, {
       sibling: siblingWords(this.progress.sibling).Ton.toUpperCase(),
       fragments: this.fragments(),

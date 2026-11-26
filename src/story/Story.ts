@@ -95,6 +95,16 @@ export const STORY_LOGS: readonly StoryLog[] = [
       return `Tu as réuni les trois fragments et tu les diffuses depuis le plus haut toit de Néo-Véridian. Sur chaque écran du secteur, la voix de ${w.ton} remplace les messages d'Aegis. La purge s'arrête à 97 %. Le reste, la ville s'en souviendra.`;
     },
   },
+  {
+    level: 4,
+    code: 'FIN',
+    title: 'PURGE ANNULÉE',
+    fragment: false,
+    text: (s) => {
+      const w = siblingWords(s);
+      return `La Sentinelle d'Aegis s'écrase sur le toit de sa propre tour, et avec elle les 3 % de purge qui restaient. En bas, les écrans du secteur passent en boucle la voix de ${w.ton}. Quelqu'un, quelque part, rallume ses néons. Tu restes un moment sous la pluie, à écouter. Puis tu repars en courant. Pas pour fuir : parce que tu aimes ça.`;
+    },
+  },
 ];
 
 export function logForLevel(level: number): StoryLog | null {

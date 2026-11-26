@@ -110,6 +110,8 @@ export class LevelBuilder {
   private readonly steam: Steam;
   /** Contenu du niveau courant (retiré au changement de niveau). */
   readonly course = new THREE.Group();
+  /** Balise d'arrivée (masquée tant que le boss du niveau est en vie). */
+  private finishGroup: THREE.Group | null = null;
   private readonly courseColliders: RAPIER.Collider[] = [];
   readonly courseDisposables: { dispose(): void }[] = [];
   /** Zones à garder libres (ennemis, tremplins, obstacles) lors du placement des accessoires. */
@@ -233,6 +235,10 @@ export class LevelBuilder {
     this.spinners.length = 0;
     this.exclusions.length = 0;
     this.roofs.length = 0;
+  }
+
+  setFinishVisible(visible: boolean): void {
+    if (this.finishGroup) this.finishGroup.visible = visible;
   }
 
   /** Zone gardée libre d'accessoires de toit (secrets, points d'appel). */
@@ -909,9 +915,12 @@ export class LevelBuilder {
     });
     this.beaconMaterials.push(mat);
     this.courseDisposables.push(mat);
+    const group = new THREE.Group();
+    this.course.add(group);
+    this.finishGroup = group;
     const column = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 140, 48, 1, true), mat);
     column.position.set(position.x, position.y + 70, position.z);
-    this.course.add(column);
+    group.add(column);
 
     const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(NEON.yellow).multiplyScalar(4 * LIGHTING.neon), toneMapped: false });
     this.courseDisposables.push(ringMat);
@@ -921,12 +930,14 @@ export class LevelBuilder {
       const holder = new THREE.Group();
       holder.position.set(position.x, position.y + 0.12 + i * 0.05, position.z);
       holder.add(ring);
-      this.course.add(holder);
+      group.add(holder);
       this.spinners.push({ object: holder, speed: i === 0 ? 1.2 : -0.8 });
     }
     this.addHoloSign(['◆ EXTRACTION ◆'], new THREE.Vector3(position.x, position.y + 4.5, position.z), NEON.yellow, 5);
+    group.add(this.course.children[this.course.children.length - 1]);
     const light = new THREE.PointLight(NEON.yellow, 18 * LIGHTING.pointLights, 25, 2);
     light.position.set(position.x, position.y + 3, position.z);
+    // La lumière reste hors du groupe : la masquer changerait le nombre de lumières (recompilation des shaders)
     this.course.add(light);
   }
 
