@@ -402,6 +402,8 @@ export const GRAPPLE = {
   touchConeDeg: 30,
   /** Durée maximale de la traction. */
   pullTime: 1.4,
+  /** Vitesse de traction (m/s). */
+  pullSpeed: 30,
   cooldown: 0.35,
   /** Rebond après une élimination au grappin. */
   killBounce: 10,

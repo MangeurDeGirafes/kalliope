@@ -117,6 +117,8 @@ export class HUD {
   private readonly root: HTMLDivElement;
   private readonly levelLabel: HTMLDivElement;
   private readonly timer: HTMLDivElement;
+  private readonly ghostDelta: HTMLDivElement;
+  private lastGhostText = '';
   private readonly targets: HTMLDivElement;
   private readonly crosshair: HTMLDivElement;
   private readonly hitmarker: HTMLDivElement;
@@ -173,6 +175,7 @@ export class HUD {
     const top = el('div', 'hud-top', this.root);
     this.levelLabel = el('div', 'hud-level', top);
     this.timer = el('div', 'hud-timer', top, '00:00.00');
+    this.ghostDelta = el('div', 'hud-ghost', top);
     this.targets = el('div', 'hud-targets', top, 'CIBLES 0/0');
     this.credits = el('div', 'hud-credits', top, '0 ¢');
     this.objective = el('div', 'hud-objective', top);
@@ -490,6 +493,16 @@ export class HUD {
     this.chargeLabel.classList.toggle('show', ready);
     this.chargeLabel.textContent = kind === 'pistol' ? 'CHEVROTINE !' : kind === 'monowire' ? 'BALAYAGE !' : kind === 'gorilla' ? 'SÉISME !' : 'RELÂCHE !';
     this.chargeRing.style.setProperty('--charge', String(ready ? 100 : Math.max(0, q)));
+  }
+
+  /** Écart avec le fantôme du record (s) ; null = masqué. */
+  setGhostDelta(delta: number | null): void {
+    const text = delta === null ? '' : `◆ ${delta <= 0 ? '−' : '+'}${Math.abs(delta).toFixed(2)}`;
+    if (text === this.lastGhostText) return;
+    this.lastGhostText = text;
+    this.ghostDelta.textContent = text;
+    this.ghostDelta.classList.toggle('show', delta !== null);
+    this.ghostDelta.classList.toggle('ahead', delta !== null && delta <= 0);
   }
 
   /**

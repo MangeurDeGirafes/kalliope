@@ -201,8 +201,8 @@ export class PlayerController {
       this.endGrapple(true);
       return;
     }
-    // Traction : la vitesse tend vers 30 m/s dans l'axe de la corde
-    to.divideScalar(dist).multiplyScalar(30);
+    // Traction : la vitesse tend vers ~30 m/s dans l'axe de la corde
+    to.divideScalar(dist).multiplyScalar(STATS.grapplePull);
     to.y += 2;
     this.velocity.lerp(to, 1 - Math.exp(-9 * dt));
     if (this.grappleTimer <= 0) this.endGrapple(false);

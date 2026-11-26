@@ -4,6 +4,7 @@ import type { Physics } from '../core/Physics';
 import type { Enemy } from '../enemies/EnemyManager';
 import { Beam } from '../effects/Beam';
 import { GRAPPLE, LIGHTING } from '../config';
+import { STATS } from '../progress/Progress';
 import type { AnchorDef } from './levels';
 
 /** Cible du grappin : une ancre magnétique ou un ennemi (point mobile). */
@@ -115,11 +116,12 @@ export class GrappleSystem {
       if (dist < GRAPPLE.minDistance || dist > range) return;
       const c = to.dot(forward) / dist;
       if (c < cosCone) return;
-      // Le mieux centré l'emporte ; à angle égal, le plus proche
-      list.push({ point, enemy, anchor, score: c - dist * 0.0015, dist });
+      // Le mieux centré l'emporte ; à angle égal, le plus proche, et les ancres
+      // passent légèrement devant les ennemis (un drone sur la trajectoire ne vole pas la cible)
+      list.push({ point, enemy, anchor, score: c - dist * 0.0015 - (enemy ? 0.006 : 0), dist });
     };
-    this.anchors.forEach((a, i) => consider(a.position, GRAPPLE.range, null, i));
-    for (const e of enemies) if (e.alive) consider(e.center, GRAPPLE.enemyRange, e, -1);
+    this.anchors.forEach((a, i) => consider(a.position, STATS.grappleRange, null, i));
+    for (const e of enemies) if (e.alive) consider(e.center, STATS.grappleEnemyRange, e, -1);
     if (list.length === 0) return null;
     list.sort((a, b) => b.score - a.score);
     for (const c of list) {

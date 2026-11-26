@@ -45,7 +45,7 @@ export interface BuildingDef {
   side?: boolean;
 }
 
-export type SecretKind = 'vinyl' | 'tag' | 'beacon24' | 'payphone' | 'garden' | 'crane' | 'watertower';
+export type SecretKind = 'vinyl' | 'tag' | 'beacon24' | 'payphone' | 'garden' | 'crane' | 'watertower' | 'radio';
 
 /** Easter egg caché dans un niveau : trouvé en s'approchant ou en tirant dessus. */
 export interface SecretDef {
@@ -697,8 +697,8 @@ const THE_ANTENNA: LevelDef = {
     roof(0, -196, -214, 48, 12, 'pink', 1, 'tar', 504),
     roof(0, -270, -306, 52, 22, 'warm', 7, 'concrete', 505),
     // Perchoirs des tireurs d'élite
-    { x: 26, z: -120, w: 7, d: 7, top: 52, trim: 'yellow', facade: 6, roof: 'tar', side: true },
-    { x: -24, z: -232, w: 7, d: 7, top: 58, trim: 'red', facade: 3, roof: 'rust', side: true },
+    { x: 28, z: -120, w: 12, d: 12, top: 52, trim: 'yellow', facade: 6, roof: 'tar', side: true },
+    { x: -27, z: -232, w: 12, d: 12, top: 58, trim: 'red', facade: 3, roof: 'rust', side: true },
     // Socle du mât
     { x: 19, z: -296, w: 10, d: 10, top: 52, trim: 'red', facade: 7, roof: 'concrete', side: true },
   ],
@@ -710,11 +710,25 @@ const THE_ANTENNA: LevelDef = {
     // Chaîne au-dessus du grand vide : on regrappine en plein vol
     [0, 58, -232],
     [0, 60, -258],
-    // Ancres de secours sur les côtés
-    [-9, 55, -244],
-    [9, 61, -122],
+    // Ancres latérales : mènent aux perchoirs des tireurs d'élite (freinées à l'arrivée)
+    [24, 60, -120, 2],
+    [-23, 66, -230, 2],
   ],
   landmarks: [{ kind: 'antenna', pos: [19, 52, -296], height: 38 }],
+  secrets: [
+    {
+      id: 'radio',
+      kind: 'radio',
+      pos: [16, 52, -292.5],
+      yaw: -Math.PI / 2,
+      radius: 3,
+      hit: [0, 0.9, 0],
+      name: 'LA RADIO DE SACHA',
+      text: 'Une radio de poche scotchée au pied du mât, réglée sur une fréquence morte. Sur le ruban adhésif, au feutre : « pour quand tu monteras ici ». Le voyant clignote trois fois, puis s\'arrête.',
+      hint: 'Tout en haut, au pied du mât, quelque chose capte encore. Saute sur son socle.',
+      approach: [8, -292],
+    },
+  ],
   walls: [],
   barriers: [{ x: 0, z: -282, roofWidth: 22, roofY: 52 }],
   pads: [],
@@ -734,8 +748,8 @@ const THE_ANTENNA: LevelDef = {
     [5, 52, -290, 0],
   ],
   snipers: [
-    [26, 52, -120, -0.9],
-    [-24, 58, -232, 0.7],
+    [30, 52, -121, -0.9],
+    [-29, 58, -234, 0.7],
   ],
   drones: [
     [3, 45, -60],
@@ -743,7 +757,7 @@ const THE_ANTENNA: LevelDef = {
     [0, 57, -284],
   ],
   kamikazes: [
-    [0, 47, -96],
+    [6, 48, -92],
     [4, 49, -176],
     [-3, 56, -276],
   ],

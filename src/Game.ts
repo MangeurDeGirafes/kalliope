@@ -34,6 +34,7 @@ import type { PowerKind } from './world/PowerUps';
 import { CHARGED, COMBAT, GRAPPLE, SANDEVISTAN, TOUCH } from './config';
 import { GrappleSystem } from './world/Grapple';
 import { buildAntenna } from './world/Landmarks';
+import { GhostRecorder, GhostRunner, decodeGhost } from './game/Ghost';
 import type { GrappleTarget } from './world/Grapple';
 import type { Enemy } from './enemies/EnemyManager';
 
@@ -90,6 +91,7 @@ const SECRET_REWARD = 25;
 /** Ancien record (avant les niveaux multiples) : celui du premier parcours. */
 const LEGACY_BEST_TIME_KEY = 'neon-vertigo-best-time';
 const BEST_TIME_PREFIX = 'neon-vertigo-best-';
+const GHOST_PREFIX = 'neon-vertigo-ghost-';
 const LAST_LEVEL_KEY = 'neon-vertigo-level';
 const TUTORIAL_KEY = 'neon-vertigo-tutorial-seen';
 
@@ -143,6 +145,10 @@ export class Game {
   private readonly tmp = new THREE.Vector3();
   private readonly grapple: GrappleSystem;
   private killFlash = 0;
+  /** Fantôme du record : enregistrement de la course en cours et rejeu du meilleur temps. */
+  private readonly ghostRec = new GhostRecorder();
+  private readonly ghost: GhostRunner;
+  private runClock = 0;
   private grappleTarget: GrappleTarget | null = null;
   private grappleEnemy: Enemy | null = null;
   private grappleCooldown = 0;
@@ -169,6 +175,7 @@ export class Game {
     this.player = new PlayerController(physics, this.audio, this.engine.camera);
     this.enemies = new EnemyManager(this.engine.scene, physics, this.particles, this.audio);
     this.grapple = new GrappleSystem(this.engine.scene);
+    this.ghost = new GhostRunner(this.engine.scene);
     this.weapons = new WeaponManager(this.engine, physics, this.enemies, this.particles, this.audio, this.player);
     this.hud = new HUD(document.body, STATS.dashMax, STATS.maxHealth, IS_TOUCH);
     this.shop = new Shop(document.body);
@@ -609,7 +616,11 @@ export class Game {
       if (!this.timerRunning && (this.player.horizontalSpeed > 0.5 || this.player.velocity.y > 1)) {
         this.timerRunning = true;
       }
-      if (this.timerRunning) this.elapsed += realDt;
+      if (this.timerRunning) {
+        this.elapsed += realDt;
+        this.runClock += realDt;
+        this.ghostRec.sample(this.runClock, this.tmp.set(this.player.position.x, this.player.feetY, this.player.position.z), this.player.yaw);
+      }
       this.checkJumpPads();
       this.checkKillPlane();
       this.checkSecretsNearby();
@@ -622,6 +633,12 @@ export class Game {
 
     this.weapons.update(playerDt, realDt, this.input, controlsEnabled);
     this.updateGrapple(playerDt, controlsEnabled && this.mode === 'level');
+    if (this.mode === 'level') {
+      this.ghost.update(this.runClock, this.engine.camera.position);
+      this.updateGhostDelta(realDt);
+    } else {
+      this.hud.setGhostDelta(null);
+    }
     this.enemies.update(worldDt, this.player);
     if (this.mode === 'level' && this.boss && (this.state === 'playing' || this.state === 'dead')) this.boss.update(worldDt, this.player);
     this.hud.setBoss(this.mode === 'level' && this.boss ? this.boss.status() : null);
@@ -710,7 +727,7 @@ export class Game {
         p.endGrapple(false);
         this.tmp.subVectors(e.center, p.position).normalize();
         this.enemies.kill(e, this.tmp, 'grapple');
-        p.velocity.set(p.velocity.x * 0.35, GRAPPLE.killBounce, p.velocity.z * 0.35);
+        p.velocity.set(p.velocity.x * 0.35, STATS.grappleBounce, p.velocity.z * 0.35);
         this.hitstop = Math.max(this.hitstop, 0.09);
         this.audio.playPunch();
         vibrate(25);
@@ -766,6 +783,21 @@ export class Game {
     this.touch?.setGrapple(t ? (t.enemy ? 'enemy' : 'anchor') : 'none');
   }
 
+  private ghostDeltaTimer = 0;
+
+  /** Écart avec le fantôme, mesuré à la même profondeur du parcours (rafraîchi 4 fois par seconde). */
+  private updateGhostDelta(dt: number): void {
+    if (!this.ghost.loaded || !this.timerRunning || this.state !== 'playing' || LEVELS[this.currentLevel].boss) {
+      if (this.state !== 'finished') this.hud.setGhostDelta(null);
+      return;
+    }
+    this.ghostDeltaTimer -= dt;
+    if (this.ghostDeltaTimer > 0) return;
+    this.ghostDeltaTimer = 0.25;
+    const t = this.ghost.timeAtZ(this.player.position.z);
+    this.hud.setGhostDelta(t === null ? null : this.runClock - t);
+  }
+
   /** Écran titre : caméra qui balaie doucement la ligne d'horizon. */
   private updateMenu(realDt: number): void {
     this.menuTime += realDt;
@@ -793,6 +825,9 @@ export class Game {
     this.grappleTarget = null;
     this.grappleCooldown = 0;
     this.grapple.update(0, null, null, null);
+    this.ghostRec.reset();
+    this.runClock = 0;
+    this.ghost.load(this.mode === 'level' ? decodeGhost(this.readValue(GHOST_PREFIX + LEVELS[this.currentLevel].id)) : null);
     this.style.reset();
     this.powerups.reset();
     this.powers.clear();
@@ -914,7 +949,11 @@ export class Game {
     this.touch?.setVisible(false);
     const best = this.loadBestTime(this.currentLevel);
     const isRecord = best === null || this.elapsed < best;
-    if (isRecord) this.saveBestTime(this.currentLevel, this.elapsed);
+    if (isRecord) {
+      this.saveBestTime(this.currentLevel, this.elapsed);
+      this.ghostRec.sample(this.runClock + 1 / 15, this.tmp.set(this.player.position.x, this.player.feetY, this.player.position.z), this.player.yaw);
+      if (this.ghostRec.sampleCount > 10) this.writeValue(GHOST_PREFIX + LEVELS[this.currentLevel].id, this.ghostRec.encode());
+    }
     const reward = this.progress.levelReward(LEVELS[this.currentLevel].difficulty, this.kills, best === null, isRecord && best !== null);
     // Rang et médaille de la course
     const levelDef = LEVELS[this.currentLevel];
@@ -996,6 +1035,7 @@ export class Game {
       plaza.build(b, (id) => this.progress.hasEgg(id));
       this.powerups.build(b, []);
       this.grapple.build(b, []);
+      this.ghost.load(null);
     });
     this.audio.setMusicTheme('plaza');
     this.plaza = plaza;
@@ -1184,7 +1224,7 @@ export class Game {
     const n = this.progress.countEggs('secret-');
     this.audio.playSecret();
     if (sec.def.kind === 'vinyl') this.audio.playVinyl();
-    if (sec.def.kind === 'payphone') this.audio.playLogStart();
+    if (sec.def.kind === 'payphone' || sec.def.kind === 'radio') this.audio.playLogStart();
     vibrate(30);
     this.hud.showSecret(`SECRET ${n}/${SECRET_TOTAL} · ${sec.def.name}`, `${sec.def.text} +${SECRET_REWARD} ¢`);
   }
@@ -1286,6 +1326,7 @@ export class Game {
     this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
     this.grappleEnemy = null;
     this.grapple.update(0, null, null, null);
+    this.ghost.load(null);
     this.enemies.reset();
     this.weapons.reset();
     this.hud.setVisible(false);

@@ -41,7 +41,7 @@ function gamePages(touch: boolean): Page[] {
     ),
     page(
       'OBJECTIF',
-      'Traverse les toits jusqu\'à la balise d\'extraction dorée, le plus vite possible. Le chrono démarre à ton premier pas. Éliminer les gardes et les drones est facultatif… mais ça rapporte de l\'énergie.',
+      'Traverse les toits jusqu\'à la balise d\'extraction dorée, le plus vite possible. Le chrono démarre à ton premier pas. Éliminer les gardes et les drones est facultatif… mais ça rapporte de l\'énergie. Ta meilleure course laisse un fantôme bleuté : l\'écart avec lui s\'affiche sous le chrono.',
       [],
       sceneObjective,
     ),

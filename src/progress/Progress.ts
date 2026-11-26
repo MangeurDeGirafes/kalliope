@@ -1,4 +1,4 @@
-import { BLADES, CHARGED, DASH, GORILLA, MONOWIRE, MOVEMENT, PLAYER, SANDEVISTAN } from '../config';
+import { BLADES, CHARGED, DASH, GORILLA, GRAPPLE, MONOWIRE, MOVEMENT, PLAYER, SANDEVISTAN } from '../config';
 
 /** Marchand qui vend une amélioration. */
 export type VendorId = 'clinic' | 'atelier' | 'armory' | 'ink';
@@ -26,6 +26,7 @@ export const UPGRADES: readonly UpgradeDef[] = [
   { id: 'sandy', vendor: 'clinic', name: 'SANDEVISTAN MK.II', desc: 'La jauge du Sandevistan se vide 35 % moins vite.', price: 200 },
   { id: 'blades', vendor: 'atelier', name: 'LAMES ALLONGÉES', desc: 'Portée des lames +25 % et fente plus longue.', price: 150 },
   { id: 'airjump', vendor: 'atelier', name: 'RESSORTS DE MOLLETS', desc: 'Un saut en l\'air de plus : triple saut.', price: 320 },
+  { id: 'winch', vendor: 'atelier', name: 'TREUIL MAGNÉTIQUE MK.II', desc: 'Grappin : portée +10 m, traction 25 % plus rapide, rebond plus haut après un harpon.', price: 200 },
   { id: 'magnet', vendor: 'atelier', name: 'PUCE DE NÉGOCE', desc: 'Crédits gagnés en fin de niveau +25 %.', price: 180 },
   { id: 'coolant', vendor: 'clinic', name: 'REFROIDISSEUR', desc: 'Les attaques chargées (lames, monowire, bras gorille) se rechargent 40 % plus vite.', price: 150 },
   { id: 'monowire', vendor: 'armory', name: 'MONOWIRE', desc: 'Fouet monofilament : portée 10 m, deux touches pour tuer. Maintenir puis relâcher : double balayage de zone. Touche 3.', price: 240 },
@@ -58,6 +59,10 @@ export const STATS = {
   wireChargeRadius: MONOWIRE.chargeRadius as number,
   wireChargeCooldown: MONOWIRE.chargeCooldown as number,
   gorillaCooldown: GORILLA.chargeCooldown as number,
+  grappleRange: GRAPPLE.range as number,
+  grappleEnemyRange: GRAPPLE.enemyRange as number,
+  grapplePull: GRAPPLE.pullSpeed as number,
+  grappleBounce: GRAPPLE.killBounce as number,
 };
 
 /** Récompense de fin de niveau, détaillée pour l'écran d'arrivée. */
@@ -196,6 +201,11 @@ export class Progress {
     STATS.wireChargeRadius = MONOWIRE.chargeRadius + (this.has('wirelong') ? 2.5 : 0);
     STATS.wireChargeCooldown = MONOWIRE.chargeCooldown * (this.has('coolant') ? 0.6 : 1);
     STATS.gorillaCooldown = GORILLA.chargeCooldown * (this.has('coolant') ? 0.6 : 1);
+    const winch = this.has('winch');
+    STATS.grappleRange = GRAPPLE.range + (winch ? 10 : 0);
+    STATS.grappleEnemyRange = GRAPPLE.enemyRange + (winch ? 8 : 0);
+    STATS.grapplePull = GRAPPLE.pullSpeed * (winch ? 1.25 : 1);
+    STATS.grappleBounce = GRAPPLE.killBounce * (winch ? 1.3 : 1);
   }
 
   private load(): void {

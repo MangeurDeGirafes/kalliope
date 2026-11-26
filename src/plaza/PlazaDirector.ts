@@ -19,7 +19,7 @@ const VENDING_PRICE = 2;
 /** Temps imparti pour la course de Petit Zéro (s). */
 export const RACE_LIMIT = 28;
 /** Nombre total de secrets cachés dans les niveaux. */
-export const SECRET_TOTAL = 7;
+export const SECRET_TOTAL = 8;
 
 export interface PlazaServices {
   hud: HUD;

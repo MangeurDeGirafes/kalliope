@@ -6,7 +6,7 @@ import { LIGHTING } from '../config';
 
 /**
  * Easter eggs des niveaux : chaque secret a un petit décor dédié (platine,
- * tag, balise « 24 », cabine, jardin, grue de papier, château d'eau), une
+ * tag, balise « 24 », cabine, jardin, grue de papier, château d'eau, radio), une
  * zone de découverte par proximité et/ou une sphère à abattre au pistolet.
  */
 export interface SecretRuntime {
@@ -262,6 +262,32 @@ export function buildSecret(b: LevelBuilder, def: SecretDef, found: boolean): Se
       };
       reveal = () => {
         if (fall < 0) fall = 0;
+      };
+      break;
+    }
+    case 'radio': {
+      // Caisse au pied du mât, radio de poche scotchée dessus, antenne et voyant
+      prop(1.0, 0.7, 0.7, 0, 0.35, 0, 0x5a4a32);
+      prop(1.04, 0.06, 0.74, 0, 0.71, 0, 0x4a3a28);
+      prop(0.44, 0.26, 0.14, 0, 0.87, 0, 0x2a2d38);
+      prop(0.28, 0.13, 0.02, -0.05, 0.88, 0.075, 0x8a93a8);
+      prop(0.5, 0.05, 0.17, 0, 0.84, 0, 0xd8d0b0);
+      prop(0.025, 0.55, 0.025, 0.17, 1.27, -0.03, 0xb8c2d8);
+      collider(0, 0.35, 0, 0.5, 0.35, 0.35);
+      const led = basic(0x2bffb0, 3 * LIGHTING.neon);
+      const ledMesh = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.03), led);
+      const [lx, ly, lz] = at(0.15, 0.93, 0.075);
+      ledMesh.position.set(lx, ly, lz);
+      b.course.add(ledMesh);
+      let solved = found;
+      update = (_dt, t) => {
+        // Trois éclats, puis une pause — comme la lumière de l'autre côté du fleuve
+        const phase = t % 2.6;
+        const on = solved || (phase < 1.2 && phase % 0.4 < 0.2);
+        led.color.set(0x2bffb0).multiplyScalar((on ? 3 : 0.25) * LIGHTING.neon);
+      };
+      reveal = () => {
+        solved = true;
       };
       break;
     }
