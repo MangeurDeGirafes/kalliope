@@ -2570,3 +2570,47 @@ body.tutorial-open .rotate-hint {
 .tb-grapple .label {
   font-size: calc(var(--u) * 12px);
 }
+
+/* Grappin indisponible (recharge ou plus de lancers en l'air) */
+.grapple-mark .gm-pips {
+  position: absolute;
+  left: -14px;
+  top: 18px;
+  width: 28px;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #2bffd0;
+  text-shadow: 0 0 6px rgba(43, 255, 208, 0.8);
+}
+.grapple-mark.cooling .gm-box {
+  border-color: rgba(200, 210, 230, 0.45);
+  border-style: dashed;
+  box-shadow: none;
+  animation: none;
+  transform: rotate(45deg) scale(0.85);
+}
+.grapple-mark.cooling .gm-key {
+  background: rgba(200, 210, 230, 0.45);
+  box-shadow: none;
+}
+.grapple-mark.cooling .gm-pips {
+  color: rgba(200, 210, 230, 0.6);
+  text-shadow: none;
+}
+.tb-grapple.cooling {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.level-card.locked {
+  cursor: not-allowed;
+  filter: grayscale(0.85);
+  opacity: 0.55;
+}
+.level-card.locked .lc-best {
+  color: rgba(232, 246, 255, 0.7);
+}
+.shop-locked {
+  color: rgba(232, 246, 255, 0.55) !important;
+  font-size: 11px;
+}

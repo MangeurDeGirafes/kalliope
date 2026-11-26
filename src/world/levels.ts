@@ -161,6 +161,8 @@ export interface LevelDef {
   powerups?: PowerUpDef[];
   /** Ancres magnétiques du grappin (points flottants). */
   anchors?: AnchorDef[];
+  /** Niveau verrouillé tant que le grappin n'est pas débloqué (fin de La Purge). */
+  requiresGrapple?: boolean;
   /** Grands repères (mât d'antenne…) : pied du mât et hauteur. */
   landmarks?: { kind: 'antenna'; pos: Vec3; height: number }[];
   /** Temps des médailles or / argent / bronze (s). */
@@ -310,7 +312,6 @@ const NEON_ROOFTOPS: LevelDef = {
     { lines: ['CLIC GAUCHE : LAMES MANTIS', '1 / 2 : CHANGER D\'ARME'], pos: [4.5, 3.2, -14], color: 'magenta', width: 5 },
     { lines: ['C / CTRL : GLISSADE', 'GARDE TON ÉLAN !'], pos: [-3, 3.2, -43], color: 'orange', width: 5 },
     { lines: ['WALL-RUN ►', 'SAUTE VERS LE MUR', 'EN MAINTENANT AVANCER'], pos: [5, 3.6, -68], color: 'lime', width: 4.6 },
-    { lines: ['◆ GRAPPIN : F', 'VISE L\'ANCRE, ÇA TIRE !'], pos: [-5.5, 3.4, -64], color: 'cyan', width: 4.8 },
     { lines: ['CLIC DROIT : SANDEVISTAN', 'LE TEMPS RALENTIT'], pos: [-5, 3, -108], color: 'green', width: 5 },
     { lines: ['▲ TREMPLIN ▲'], pos: [0, 4.2, -128], color: 'green', width: 3.6 },
     { lines: ['SHIFT : DASH', 'MUR À GAUCHE ◄'], pos: [-3, 11.4, -178], color: 'yellow', width: 5 },
@@ -682,6 +683,7 @@ const THE_PURGE: LevelDef = {
  */
 const THE_ANTENNA: LevelDef = {
   id: 'l-antenne',
+  requiresGrapple: true,
   name: 'L\'ANTENNE',
   subtitle: 'Grappin au-dessus du vide, jusqu\'au signal',
   difficulty: 4,

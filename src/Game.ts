@@ -92,6 +92,7 @@ const SECRET_REWARD = 25;
 const LEGACY_BEST_TIME_KEY = 'neon-vertigo-best-time';
 const BEST_TIME_PREFIX = 'neon-vertigo-best-';
 const GHOST_PREFIX = 'neon-vertigo-ghost-';
+const GRAPPLE_FLAG = 'grapple';
 const LAST_LEVEL_KEY = 'neon-vertigo-level';
 const TUTORIAL_KEY = 'neon-vertigo-tutorial-seen';
 
@@ -152,6 +153,10 @@ export class Game {
   private grappleTarget: GrappleTarget | null = null;
   private grappleEnemy: Enemy | null = null;
   private grappleCooldown = 0;
+  /** Lancers restants avant de retoucher le sol ou un mur. */
+  private grappleCharges: number = GRAPPLE.charges;
+  /** Grappin disponible dans le niveau en cours (débloqué en terminant La Purge). */
+  private grappleOn = false;
   private readonly eye = new THREE.Vector3();
   private readonly aimDir = new THREE.Vector3();
   private readonly hand = new THREE.Vector3();
@@ -251,6 +256,10 @@ export class Game {
     };
 
     this.hud.onLevelSelect = (index) => this.startGame(index);
+    this.hud.onLockedClick = () => {
+      this.audio.init();
+      this.audio.playDenied();
+    };
     this.hud.onNextClick = () => this.goToPlaza((this.currentLevel + 1) % LEVELS.length);
     this.hud.onMenuClick = () => this.showMenu();
     this.hud.onPlazaClick = () => this.goToPlaza(this.nextLevelToPlay());
@@ -632,7 +641,7 @@ export class Game {
     }
 
     this.weapons.update(playerDt, realDt, this.input, controlsEnabled);
-    this.updateGrapple(playerDt, controlsEnabled && this.mode === 'level');
+    this.updateGrapple(playerDt, controlsEnabled && this.mode === 'level' && this.grappleOn);
     if (this.mode === 'level') {
       this.ghost.update(this.runClock, this.engine.camera.position);
       this.updateGhostDelta(realDt);
@@ -712,7 +721,11 @@ export class Game {
    */
   private updateGrapple(dt: number, active: boolean): void {
     const p = this.player;
-    this.grappleCooldown = Math.max(0, this.grappleCooldown - dt);
+    // La recharge ne court qu'une fois la traction terminée ; sol ou mur rendent les lancers
+    if (!p.isGrappling) {
+      this.grappleCooldown = Math.max(0, this.grappleCooldown - dt);
+      if (p.grounded || p.wallRunning) this.grappleCharges = GRAPPLE.charges;
+    }
     if (!active && this.state !== 'playing') {
       if (p.isGrappling) p.endGrapple(false);
       this.grappleEnemy = null;
@@ -728,6 +741,8 @@ export class Game {
         this.tmp.subVectors(e.center, p.position).normalize();
         this.enemies.kill(e, this.tmp, 'grapple');
         p.velocity.set(p.velocity.x * 0.35, STATS.grappleBounce, p.velocity.z * 0.35);
+        // Un harpon réussi rend un lancer (enchaînements aériens sur les ennemis)
+        this.grappleCharges = Math.min(GRAPPLE.charges, this.grappleCharges + 1);
         this.hitstop = Math.max(this.hitstop, 0.09);
         this.audio.playPunch();
         vibrate(25);
@@ -745,11 +760,14 @@ export class Game {
       active && !p.isGrappling && p.alive
         ? this.grapple.findTarget(this.eye, this.aimDir, this.enemies.list, this.physics, this.touch ? GRAPPLE.touchConeDeg : GRAPPLE.coneDeg)
         : null;
-    if (this.grappleTarget && this.grappleCooldown <= 0 && this.input.wasPressed('grapple')) {
+    if (this.grappleTarget && this.input.wasPressed('grapple') && !this.grappleReady) {
+      this.audio.playDenied();
+    } else if (this.grappleTarget && this.grappleReady && this.input.wasPressed('grapple')) {
       const t = this.grappleTarget;
       p.startGrapple(t.point, GRAPPLE.pullTime, t.carry);
       this.grappleEnemy = t.enemy;
       this.grappleCooldown = GRAPPLE.cooldown;
+      this.grappleCharges--;
       this.grappleTarget = null;
       this.audio.playGrapple();
       vibrate(12);
@@ -773,14 +791,30 @@ export class Game {
     if (t) {
       this.screen.copy(t.point).project(cam);
       if (this.screen.z < 1) {
-        this.hud.setGrappleTarget(((this.screen.x + 1) / 2) * window.innerWidth, ((1 - this.screen.y) / 2) * window.innerHeight, t.enemy !== null);
+        this.hud.setGrappleTarget(((this.screen.x + 1) / 2) * window.innerWidth, ((1 - this.screen.y) / 2) * window.innerHeight, t.enemy !== null, this.grappleReady, this.grappleCharges);
       } else {
         this.hud.setGrappleTarget(null);
       }
     } else {
       this.hud.setGrappleTarget(null);
     }
-    this.touch?.setGrapple(t ? (t.enemy ? 'enemy' : 'anchor') : 'none');
+    this.touch?.setGrapple(t ? (t.enemy ? 'enemy' : 'anchor') : 'none', this.grappleReady);
+  }
+
+  /** Un lancer est possible : il reste une charge et la recharge est terminée. */
+  get grappleReady(): boolean {
+    return this.grappleCharges > 0 && this.grappleCooldown <= 0;
+  }
+
+  /** Le grappin se débloque en terminant La Purge (niveau 5). */
+  private grappleUnlocked(): boolean {
+    if (this.progress.hasFlag(GRAPPLE_FLAG)) return true;
+    const purge = LEVELS.findIndex((l) => l.id === 'la-purge');
+    return purge >= 0 && this.loadBestTime(purge) !== null;
+  }
+
+  private levelLocked(index: number): boolean {
+    return !!LEVELS[index]?.requiresGrapple && !this.grappleUnlocked();
   }
 
   private ghostDeltaTimer = 0;
@@ -820,10 +854,13 @@ export class Game {
   // ---------------------------------------------------------------------------
 
   private restart(): void {
+    // Grappin débloqué depuis le chargement du niveau (fin de La Purge) : on reconstruit avec les ancres
+    if (this.mode === 'level' && this.grappleOn !== this.grappleUnlocked()) this.loadLevel(this.currentLevel);
     this.player.reset(this.levelData.spawn, this.levelData.spawnYaw);
     this.grappleEnemy = null;
     this.grappleTarget = null;
     this.grappleCooldown = 0;
+    this.grappleCharges = GRAPPLE.charges;
     this.grapple.update(0, null, null, null);
     this.ghostRec.reset();
     this.runClock = 0;
@@ -964,6 +1001,9 @@ export class Game {
       reward.total += bonus;
       reward.lines.push(`RANG ${run.rank} +${bonus}`);
     }
+    if (levelDef.id === 'la-purge' && this.progress.setFlag(GRAPPLE_FLAG)) {
+      reward.lines.push('◆ GRAPPIN MAGNÉTIQUE DÉBLOQUÉ · NIVEAU 6 OUVERT');
+    }
     const prevRank = this.readValue(RANK_PREFIX + levelDef.id) as Rank | null;
     if (!prevRank || RANK_ORDER.indexOf(run.rank) > RANK_ORDER.indexOf(prevRank)) this.writeValue(RANK_PREFIX + levelDef.id, run.rank);
     this.progress.addCredits(reward.total);
@@ -1023,6 +1063,7 @@ export class Game {
   private loadPlaza(next: number): void {
     this.mode = 'plaza';
     this.plazaNext = ((next % LEVELS.length) + LEVELS.length) % LEVELS.length;
+    if (this.levelLocked(this.plazaNext)) this.plazaNext = 0;
     const exit = LEVELS[this.plazaNext];
     const def = plazaDef(`NIVEAU ${this.plazaNext + 1} : ${exit.name}`);
     const plaza = new Plaza();
@@ -1119,7 +1160,8 @@ export class Game {
         const equipped = this.progress.ink === u.id;
         return { id: u.id, name: u.name, desc: u.desc, price: u.price, owned: owned && equipped, equip: owned && !equipped, ownedLabel: 'ÉQUIPÉE ✓' };
       }
-      return { id: u.id, name: u.name, desc: u.desc, price: u.price, owned };
+      const locked = u.id === 'winch' && !owned && !this.grappleUnlocked() ? 'APRÈS LA PURGE' : undefined;
+      return { id: u.id, name: u.name, desc: u.desc, price: u.price, owned, locked };
     });
   }
 
@@ -1153,6 +1195,11 @@ export class Game {
       this.progress.setFlag(id);
       this.audio.playCoin();
       refresh(this.pickThanks(v.thanks));
+      return;
+    }
+    if (id === 'winch' && !this.grappleUnlocked()) {
+      this.audio.playDenied();
+      refresh('Un treuil sans grappin ? Reviens quand tu en auras un.');
       return;
     }
     // Encre déjà achetée : on l'équipe
@@ -1271,6 +1318,7 @@ export class Game {
 
   /** Lance un niveau (geste utilisateur requis pour le plein écran / pointer lock). */
   private startGame(index: number): void {
+    if (this.levelLocked(index)) return;
     this.audio.init();
     if (this.touch) this.enterFullscreen();
     else this.input.requestPointerLock();
@@ -1296,7 +1344,8 @@ export class Game {
     this.levelData = this.level.loadLevel(def, (b) => {
       for (const sd of def.secrets ?? []) secrets.push(buildSecret(b, sd, this.progress.hasFlag(`secret-${sd.id}`)));
       this.powerups.build(b, def.powerups ?? []);
-      this.grapple.build(b, def.anchors ?? []);
+      this.grappleOn = this.grappleUnlocked();
+      this.grapple.build(b, this.grappleOn ? def.anchors ?? [] : []);
       for (const lm of def.landmarks ?? []) if (lm.kind === 'antenna') buildAntenna(b, lm.pos[0], lm.pos[1], lm.pos[2], lm.height);
       if (def.boss) this.boss = new Boss(b, def.boss, { enemies: this.enemies, particles: this.particles, audio: this.audio });
     });
@@ -1340,6 +1389,7 @@ export class Game {
         accent: l.theme.skyGlow,
         rank: this.readValue(RANK_PREFIX + l.id),
         medal: best !== null ? medalFor(best, l.par) : null,
+        locked: this.levelLocked(i) ? 'Termine La Purge pour débloquer le grappin' : undefined,
       };
     });
     this.audio.setMusicTheme('plaza');
@@ -1387,7 +1437,7 @@ export class Game {
   private readLastLevel(): number {
     const id = this.readValue(LAST_LEVEL_KEY);
     const i = LEVELS.findIndex((l) => l.id === id);
-    return i >= 0 ? i : 0;
+    return i >= 0 && !this.levelLocked(i) ? i : 0;
   }
 
   private loadBestTime(index: number): number | null {

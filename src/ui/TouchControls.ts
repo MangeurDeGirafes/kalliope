@@ -157,11 +157,12 @@ export class TouchControls {
   }
 
   /** Bouton du grappin : visible quand une cible est dans le viseur. */
-  setGrapple(state: 'none' | 'anchor' | 'enemy'): void {
+  setGrapple(state: 'none' | 'anchor' | 'enemy', ready = true): void {
     const b = this.buttons.get('grapple');
     if (!b) return;
     b.el.classList.toggle('show', state !== 'none');
     b.el.classList.toggle('enemy', state === 'enemy');
+    b.el.classList.toggle('cooling', !ready);
   }
 
   /** Relâche toutes les commandes (pause, fin de partie). */

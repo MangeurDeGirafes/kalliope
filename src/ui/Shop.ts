@@ -9,6 +9,8 @@ export interface ShopItem {
   equip?: boolean;
   /** Libellé quand l'article est possédé (défaut « INSTALLÉ ✓ »). */
   ownedLabel?: string;
+  /** Pas encore disponible : raison affichée à la place du prix. */
+  locked?: string;
 }
 
 export interface ShopVendor {
@@ -92,6 +94,8 @@ export class Shop {
         const state = it.owned ? 'owned' : it.equip || credits >= it.price ? 'buyable' : 'poor';
         const btn = it.owned
           ? `<span class="shop-owned">${it.ownedLabel ?? 'INSTALLÉ ✓'}</span>`
+          : it.locked
+          ? `<span class="shop-owned shop-locked">${it.locked}</span>`
           : it.equip
             ? `<button class="shop-buy" type="button" data-buy="${it.id}">ÉQUIPER</button>`
             : `<button class="shop-buy" type="button" data-buy="${it.id}" ${credits >= it.price ? '' : 'disabled'}>${it.price === 0 ? 'GRATUIT' : `${it.price} ¢`}</button>`;

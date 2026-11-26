@@ -404,7 +404,10 @@ export const GRAPPLE = {
   pullTime: 1.4,
   /** Vitesse de traction (m/s). */
   pullSpeed: 30,
-  cooldown: 0.35,
+  /** Délai entre deux lancers, compté à la fin de la traction. */
+  cooldown: 0.6,
+  /** Lancers disponibles avant de retoucher le sol (ou un mur). */
+  charges: 2,
   /** Rebond après une élimination au grappin. */
   killBounce: 10,
 } as const;

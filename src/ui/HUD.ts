@@ -1,5 +1,8 @@
 import type { WeaponId } from '../weapons/WeaponManager';
 import type { Reward } from '../progress/Progress';
+import { GRAPPLE } from '../config';
+
+const GRAPPLE_CHARGES = GRAPPLE.charges;
 
 export interface HudState {
   time: number;
@@ -59,6 +62,8 @@ export interface LevelCard {
   /** Meilleur rang et médaille obtenus. */
   rank: string | null;
   medal: 'gold' | 'silver' | 'bronze' | null;
+  /** Niveau verrouillé : condition affichée sur la carte. */
+  locked?: string;
 }
 
 /** Bonus actif affiché sous les jauges. */
@@ -101,6 +106,7 @@ export class HUD {
   onTutorialClick: (() => void) | null = null;
   /** Appelé quand une carte de niveau est choisie (index). */
   onLevelSelect: ((index: number) => void) | null = null;
+  onLockedClick: (() => void) | null = null;
   /** Appelé par « Niveau suivant » sur l'écran d'arrivée. */
   onNextClick: (() => void) | null = null;
   /** Appelé par « Menu » (pause, mort, arrivée). */
@@ -125,6 +131,7 @@ export class HUD {
   private readonly chargeRing: HTMLDivElement;
   private readonly chargeLabel: HTMLDivElement;
   private readonly grappleMark: HTMLDivElement;
+  private readonly grapplePips: HTMLSpanElement;
   private grappleShown = false;
   private lastCharge = -1;
   private readonly sandFill: HTMLDivElement;
@@ -188,6 +195,7 @@ export class HUD {
     this.grappleMark = el('div', 'grapple-mark', this.root);
     el('span', 'gm-box', this.grappleMark);
     if (!touch) el('span', 'gm-key', this.grappleMark, 'F');
+    this.grapplePips = el('span', 'gm-pips', this.grappleMark);
     this.hitmarker = el('div', 'hitmarker', this.root);
     for (let i = 0; i < 4; i++) el('span', `hm h${i}`, this.hitmarker);
 
@@ -241,6 +249,12 @@ export class HUD {
       if (target?.closest('[data-act="tutorial"]')) {
         e.stopPropagation();
         this.onTutorialClick?.();
+        return;
+      }
+      if (target?.closest('[data-act="locked"]')) {
+        // Niveau verrouillé : on ne lance rien
+        e.stopPropagation();
+        this.onLockedClick?.();
         return;
       }
       const card = target?.closest<HTMLElement>('[data-act="level"]');
@@ -509,7 +523,7 @@ export class HUD {
    * Repère du grappin (coordonnées écran en px, null = aucune cible).
    * `enemy` : cible vivante (rouge) plutôt qu'une ancre (cyan).
    */
-  setGrappleTarget(x: number | null, y = 0, enemy = false): void {
+  setGrappleTarget(x: number | null, y = 0, enemy = false, ready = true, charges = 0): void {
     if (x === null) {
       if (this.grappleShown) this.grappleMark.classList.remove('show');
       this.grappleShown = false;
@@ -518,6 +532,9 @@ export class HUD {
     if (!this.grappleShown) this.grappleMark.classList.add('show');
     this.grappleShown = true;
     this.grappleMark.classList.toggle('enemy', enemy);
+    this.grappleMark.classList.toggle('cooling', !ready);
+    const pips = '●'.repeat(charges) + '○'.repeat(Math.max(0, GRAPPLE_CHARGES - charges));
+    if (this.grapplePips.textContent !== pips) this.grapplePips.textContent = pips;
     this.grappleMark.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   }
 
@@ -561,6 +578,15 @@ export class HUD {
       .map((l, i) => {
         const pips = Array.from({ length: 4 }, (_, k) => `<i class="${k < l.difficulty ? 'on' : ''}"></i>`).join('');
         const accent = `#${l.accent.toString(16).padStart(6, '0')}`;
+        if (l.locked) {
+          return `
+          <button class="level-card locked" data-act="locked" type="button" aria-disabled="true" style="--accent:${accent}">
+            <span class="lc-num">${String(i + 1).padStart(2, '0')}</span>
+            <span class="lc-name">${l.name}</span>
+            <span class="lc-sub">${l.locked}</span>
+            <span class="lc-foot"><span class="lc-best">VERROUILLÉ</span></span>
+          </button>`;
+        }
         return `
           <button class="level-card${i === selected ? ' selected' : ''}" data-act="level" data-level="${i}" type="button" style="--accent:${accent}">
             <span class="lc-num">${String(i + 1).padStart(2, '0')}</span>

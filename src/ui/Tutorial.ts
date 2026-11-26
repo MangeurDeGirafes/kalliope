@@ -71,7 +71,7 @@ function gamePages(touch: boolean): Page[] {
     ),
     page(
       'GRAPPIN',
-      'Vise une ancre magnétique (anneau cyan) : un repère apparaît, lance le grappin et le câble te tire à toute vitesse au-dessus du vide. Saute pour lâcher plus tôt en gardant l\'élan. Harponne un garde ou un drone pour foncer dessus et l\'éliminer d\'un coup de pied.',
+      'Se débloque en terminant La Purge (niveau 5). Vise une ancre magnétique (anneau cyan) : un repère apparaît, lance le grappin et le câble te tire à toute vitesse au-dessus du vide. Saute pour lâcher plus tôt en gardant l\'élan. Harponne un garde ou un drone pour foncer dessus et l\'éliminer d\'un coup de pied. Deux lancers maximum avant de retoucher le sol ou un mur.',
       keys(['F / G : GRAPPIN', 'ESPACE : LÂCHER'], ['BOUTON GRAPPIN', 'SAUT : LÂCHER']),
       sceneGrapple,
     ),
